@@ -58,7 +58,7 @@
       (handler-case
           (progn
             ;; Draw the content area with history and results
-            (draw-content-area content-height history results scroll-offset)
+            (draw-content-area content-height history results scroll-offset cols)
 
             ;; Update prompt area
             (draw-bottom-interface rows cols input-buffer status-message)
@@ -82,16 +82,17 @@
                 ((char= char (code-char 27))
                  (let ((escape-sequence (read-escape-sequence)))
                    (cond
-                     ;; Page Up key
+                     ;; Page Up key - scroll up to see older entries
                      ((string= escape-sequence "[5~")
-                      (let ((total-lines (length history)))
-                        (when (< scroll-offset (max 0 (- total-lines content-height)))
-                          (incf scroll-offset))))
+                      (let* ((total-entries (length history))
+                             (entries-that-fit (floor content-height 3))
+                             (max-scroll (max 0 (- total-entries entries-that-fit))))
+                        (when (> total-entries entries-that-fit)
+                          (setf scroll-offset (min max-scroll (+ scroll-offset 3))))))
 
-                     ;; Page Down key
+                     ;; Page Down key - scroll down to see newer entries
                      ((string= escape-sequence "[6~")
-                      (when (> scroll-offset 0)
-                        (decf scroll-offset)))
+                      (setf scroll-offset (max 0 (- scroll-offset 3))))
 
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
@@ -135,16 +136,16 @@
                        (push result results))
                      (setf history-index 0)
 
-                     ;; Auto-scroll to show latest
+                     ;; Auto-scroll to show latest (scroll to bottom)
                      (let ((total-lines (length history)))
                        (when (> total-lines content-height)
-                         (setf scroll-offset (- total-lines content-height)))))
+                         (setf scroll-offset 0)))))
 
                    ;; Reset input buffer and original input
                    (setf input-buffer ""
                          original-input ""
                          ctrl-c-pressed nil  ; Reset Ctrl+C state
-                         status-message "")))
+                         status-message ""))
 
                 ;; Backspace - remove character
                 ((or (char= char #\Backspace) (char= char #\Del))
@@ -217,46 +218,94 @@
   (move-cursor (- rows 2) (+ 8 (length input-buffer)))
   (force-output))
 
-(defun draw-content-area (content-height history results scroll-offset)
+(defun draw-content-area (content-height history results scroll-offset cols)
   "Draw the scrollable content area with history and results"
-  (let ((display-start (max 0 scroll-offset))
-        (display-end (min (length history) (+ scroll-offset content-height)))
-        (current-row 1))
+  (let ((total-entries (length history))
+        (current-row 1)
+        (content-width (- cols 2))) ; Reserve 2 columns for scroll bar
 
     ;; Clear the content area
     (loop for row from 1 to content-height do
       (move-cursor row 1)
       (clear-line))
 
-    ;; Display visible history entries and their results
-    (loop for i from display-start below display-end
-          for hist-item = (nth (- (length history) 1 i) history)
-          for result-item = (nth (- (length results) 1 i) results)
-          do
-          (when (<= current-row content-height)
-            ;; Display command
-            (move-cursor current-row 1)
-            (set-color 6) ; Cyan
-            (format t "tcode> ")
-            (reset-color)
-            (format t "~A" hist-item)
-            (incf current-row))
+    ;; Calculate which entries to show
+    ;; scroll-offset=0 means show most recent entries (default)
+    ;; Higher scroll-offset means show older entries
+    (when (> total-entries 0)
+      (let* ((entries-that-fit (floor content-height 3)) ; Each entry takes ~3 lines (cmd + result + blank)
+             (start-index (max 0 (- total-entries entries-that-fit scroll-offset)))
+             (end-index total-entries))
 
-          (when (and result-item (<= current-row content-height))
-            ;; Display result
-            (move-cursor current-row 1)
-            (set-color 3) ; Yellow
-            (format t "=> ")
-            (reset-color)
-            (format t "~A" result-item)
-            (incf current-row))
+        ;; Display visible history entries and their results
+        (loop for i from start-index below end-index
+              for hist-item = (nth i history)
+              for result-item = (nth i results)
+              do
+              (when (<= current-row content-height)
+                ;; Display command (truncate if too long for content width)
+                (move-cursor current-row 1)
+                (set-color 6) ; Cyan
+                (format t "tcode> ")
+                (reset-color)
+                (let ((cmd-text (if (> (length hist-item) (- content-width 7))
+                                    (concatenate 'string
+                                                 (subseq hist-item 0 (- content-width 10))
+                                                 "...")
+                                    hist-item)))
+                  (format t "~A" cmd-text))
+                (incf current-row))
 
-          ;; Add blank line between entries if space allows
-          (when (<= current-row content-height)
-            (incf current-row)))
+              (when (and result-item (<= current-row content-height))
+                ;; Display result (truncate if too long for content width)
+                (move-cursor current-row 1)
+                (set-color 3) ; Yellow
+                (format t "=> ")
+                (reset-color)
+                (let ((result-text (if (> (length (format nil "~A" result-item)) (- content-width 3))
+                                       (concatenate 'string
+                                                    (subseq (format nil "~A" result-item) 0 (- content-width 6))
+                                                    "...")
+                                       (format nil "~A" result-item))))
+                  (format t "~A" result-text))
+                (incf current-row))
+
+              ;; Add blank line between entries if space allows
+              (when (<= current-row content-height)
+                (incf current-row)))))
+
+    ;; Draw scroll bar on the right side
+    (draw-scroll-bar content-height total-entries scroll-offset cols)
 
     (force-output)))
 
+(defun draw-scroll-bar (content-height total-entries scroll-offset cols)
+  "Draw a scroll bar on the right side indicating scroll position"
+  (when (> total-entries 0)
+    (let* ((entries-that-fit (floor content-height 3))
+           (scrollbar-col (- cols 1))
+           (scrollbar-height content-height)
+           (total-scrollable (max 0 (- total-entries entries-that-fit))))
+
+      ;; Only show scroll bar if there's content to scroll
+      (when (> total-scrollable 0)
+        ;; Calculate thumb position and size
+        (let* ((thumb-size (max 1 (floor (* scrollbar-height entries-that-fit) total-entries)))
+               (scrollable-range (- scrollbar-height thumb-size))
+               (thumb-position (if (> total-scrollable 0)
+                                 (floor (* scrollable-range scroll-offset) total-scrollable)
+                                 0)))
+
+          ;; Draw scroll track (background)
+          (loop for row from 1 to scrollbar-height do
+            (move-cursor row scrollbar-col)
+            (format t "~C[90m│~C[0m" #\Escape #\Escape)) ; Gray track
+
+          ;; Draw scroll thumb (foreground)
+          (loop for row from (1+ thumb-position) to (+ thumb-position thumb-size) do
+            (when (<= row scrollbar-height)
+              (move-cursor row scrollbar-col)
+              (format t "~C[97m█~C[0m" #\Escape #\Escape)))))))) ; White thumb
 
 (defun safe-eval-string (input-string)
   "Safely evaluate a Lisp expression from string"
