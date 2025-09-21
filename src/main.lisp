@@ -26,6 +26,7 @@
               ;; Start the main REPL loop
               (repl-loop pty rows cols))
 
+
           (error (e)
             (move-cursor (- rows 4) 1)
             (set-color 1) ; Red
@@ -34,10 +35,7 @@
 
       ;; Always cleanup, even on errors
       (disable-raw-mode 0)
-      (cleanup-pty pty)
-      (move-cursor (- rows 2) 1)
-      (format t "Shutting down...")
-      (move-cursor (1- rows) 1)))))
+      (cleanup-pty pty)))))
 
 (defun repl-loop (pty rows cols)
   "Main REPL loop with fixed prompt at bottom and scrollable history above"
@@ -47,12 +45,14 @@
         (results '())
         (history-index 0)
         (original-input "")  ; Store the original input when history navigation starts
-        (content-height (- rows 3))  ; Reserve 3 lines for prompt area
-        (scroll-offset 0))
+        (content-height (- rows 4))  ; Reserve 4 lines for prompt area and status
+        (scroll-offset 0)
+        (status-message "")
+        (ctrl-c-pressed nil))
 
     ;; Initial screen setup
     (clear-screen)
-    (draw-bottom-interface rows cols input-buffer)
+    (draw-bottom-interface rows cols input-buffer status-message)
 
     (loop
       (handler-case
@@ -61,14 +61,22 @@
             (draw-content-area content-height history results scroll-offset)
 
             ;; Update prompt area
-            (draw-bottom-interface rows cols input-buffer)
+            (draw-bottom-interface rows cols input-buffer status-message)
 
             ;; Read character
             (let ((char (read-char-raw)))
               (cond
-                ;; Ctrl+C - exit
+                ;; Ctrl+C - handle double press to exit
                 ((char= char (code-char 3))
-                 (return))
+                 (if ctrl-c-pressed
+                     (progn
+                       ;; Clear screen and reset cursor before exiting
+                       (clear-screen)
+                       (move-cursor 1 1)
+                       (return))  ; Exit on second Ctrl+C
+                     (progn
+                       (setf ctrl-c-pressed t
+                             status-message "Press Ctrl-C again to exit..."))))
 
                 ;; ESC sequence handling
                 ((char= char (code-char 27))
@@ -92,7 +100,9 @@
                         (when (= history-index 0)
                           (setf original-input input-buffer))
                         (incf history-index)
-                        (setf input-buffer (nth (1- history-index) history))))
+                        (setf input-buffer (nth (1- history-index) history)
+                              ctrl-c-pressed nil  ; Reset Ctrl+C state
+                              status-message "")))
 
                      ;; Arrow Down key
                      ((string= escape-sequence "[B")
@@ -100,16 +110,22 @@
                         (decf history-index)
                         (if (= history-index 0)
                             (setf input-buffer original-input)  ; Restore original input
-                            (setf input-buffer (nth (1- history-index) history)))))
+                            (setf input-buffer (nth (1- history-index) history)))
+                        (setf ctrl-c-pressed nil  ; Reset Ctrl+C state
+                              status-message "")))
 
                      ;; Standalone ESC - exit
                      ((string= escape-sequence "")
+                      (clear-screen)
+                      (move-cursor 1 1)
                       (return)))))
 
                 ;; Enter - process input
                 ((or (char= char #\Return) (char= char #\Newline))
                  (let ((trimmed-input (string-trim " " input-buffer)))
                    (when (string= trimmed-input "exit")
+                     (clear-screen)
+                     (move-cursor 1 1)
                      (return))
 
                    (when (> (length trimmed-input) 0)
@@ -126,7 +142,9 @@
 
                    ;; Reset input buffer and original input
                    (setf input-buffer ""
-                         original-input "")))
+                         original-input ""
+                         ctrl-c-pressed nil  ; Reset Ctrl+C state
+                         status-message "")))
 
                 ;; Backspace - remove character
                 ((or (char= char #\Backspace) (char= char #\Del))
@@ -134,20 +152,27 @@
                    (setf input-buffer (subseq input-buffer 0 (1- (length input-buffer))))
                    ;; Reset history navigation since user is editing
                    (setf history-index 0
-                         original-input input-buffer)))
+                         original-input input-buffer
+                         ctrl-c-pressed nil  ; Reset Ctrl+C state
+                         status-message "")))
 
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
                  (setf history '()
                        results '()
-                       scroll-offset 0))
+                       scroll-offset 0
+                       ctrl-c-pressed nil  ; Reset Ctrl+C state
+                       status-message ""))
 
                 ;; Regular characters - add to buffer
                 ((and (graphic-char-p char) (< (length input-buffer) 200))
                  (setf input-buffer (concatenate 'string input-buffer (string char)))
                  ;; Reset history navigation since user is editing
                  (setf history-index 0
-                       original-input input-buffer)))))
+                       original-input input-buffer
+                       ctrl-c-pressed nil  ; Reset Ctrl+C state on any other input
+                       status-message "")))))
+
 
         (error (e)
           (move-cursor (- rows 3) 1)
@@ -156,19 +181,19 @@
           (reset-color))))))
 
 (defun draw-horizontal-line (row cols)
-  "Draw a horizontal separator line"
+  "Draw a horizontal separator line using Unicode box drawing characters"
   (move-cursor row 1)
   (format t "~C[90m" #\Escape) ; Gray color directly
-  (format t "~A" (make-string cols :initial-element #\-))
+  (format t "~A" (make-string cols :initial-element #\─))  ; Unicode horizontal line
   (reset-color))
 
-(defun draw-bottom-interface (rows cols input-buffer)
-  "Draw the fixed prompt interface at the bottom"
+(defun draw-bottom-interface (rows cols input-buffer status-message)
+  "Draw the fixed prompt interface at the bottom with status line"
   ;; Top separator line
-  (draw-horizontal-line (- rows 2) cols)
+  (draw-horizontal-line (- rows 3) cols)
 
   ;; Prompt line
-  (move-cursor (- rows 1) 1)
+  (move-cursor (- rows 2) 1)
   (clear-line)
   (set-color 6) ; Cyan
   (format t "tcode> ")
@@ -176,6 +201,14 @@
   (format t "~A" input-buffer)
   ;; White rectangle cursor
   (format t "~C[47m ~C[0m" #\Escape #\Escape)
+
+  ;; Status line
+  (move-cursor (- rows 1) 1)
+  (clear-line)
+  (when (> (length status-message) 0)
+    (set-color 3) ; Yellow for status messages
+    (format t "~A" status-message)
+    (reset-color))
 
   ;; Bottom separator line
   (draw-horizontal-line rows cols)

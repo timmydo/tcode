@@ -309,10 +309,15 @@
 (defun read-char-raw ()
   "Read a single character from stdin without waiting for newline"
   (cffi:with-foreign-object (buffer :unsigned-char 1)
-    (loop
-      (let ((bytes-read (%read 0 buffer 1)))
-        (when (> bytes-read 0)
-          (return (code-char (cffi:mem-aref buffer :unsigned-char 0))))))))
+    (block read-char-block
+      (handler-case
+          (loop
+            (let ((bytes-read (%read 0 buffer 1)))
+              (when (> bytes-read 0)
+                (return-from read-char-block (code-char (cffi:mem-aref buffer :unsigned-char 0))))))
+        (sb-sys:interactive-interrupt ()
+          ;; Convert interrupt signal to Ctrl-C character for proper handling
+          (return-from read-char-block (code-char 3)))))))
 
 (defun read-escape-sequence ()
   "Read the remainder of an escape sequence after ESC has been read"
