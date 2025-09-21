@@ -166,9 +166,9 @@ for test_file in $lisp_test_files; do
                 if sbcl --noinform --no-userinit --no-sysinit --non-interactive \
                         --eval "(require \"asdf\")" \
                         --eval "(sb-int:set-floating-point-modes :traps nil)" \
-                        --eval "(asdf:load-system :tle)" \
+                        --eval "(asdf:load-system :tcode)" \
                         --eval "(load \"$test_file\")" \
-                        --eval "(if (tle::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))"; then
+                        --eval "(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))"; then
                     TESTS_PASSED=$((TESTS_PASSED + 1))
                     echo "✓ Lisp tests in $test_file passed"
                 else
@@ -181,9 +181,9 @@ for test_file in $lisp_test_files; do
                 if output=$(sbcl --noinform --no-userinit --no-sysinit --non-interactive \
                         --eval "(require \"asdf\")" \
                         --eval "(sb-int:set-floating-point-modes :traps nil)" \
-                        --eval "(asdf:load-system :tle)" \
+                        --eval "(asdf:load-system :tcode)" \
                         --eval "(load \"$test_file\")" \
-                        --eval "(if (tle::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))" 2>&1); then
+                        --eval "(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))" 2>&1); then
                     TESTS_PASSED=$((TESTS_PASSED + 1))
                 else
                     TESTS_FAILED=$((TESTS_FAILED + 1))
