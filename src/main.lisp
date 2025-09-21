@@ -202,16 +202,19 @@
   ;; White rectangle cursor
   (format t "~C[47m ~C[0m" #\Escape #\Escape)
 
+  ;; Bottom separator line
+  (draw-horizontal-line (- rows 1) cols)
+
   ;; Status line
-  (move-cursor (- rows 1) 1)
+  (move-cursor rows 1)
   (clear-line)
   (when (> (length status-message) 0)
     (set-color 3) ; Yellow for status messages
     (format t "~A" status-message)
     (reset-color))
 
-  ;; Bottom separator line
-  (draw-horizontal-line rows cols)
+  ;; Move cursor back to prompt area and hide it
+  (move-cursor (- rows 2) (+ 8 (length input-buffer)))
   (force-output))
 
 (defun draw-content-area (content-height history results scroll-offset)
