@@ -46,6 +46,7 @@
         (history '())
         (results '())
         (history-index 0)
+        (original-input "")  ; Store the original input when history navigation starts
         (content-height (- rows 3))  ; Reserve 3 lines for prompt area
         (scroll-offset 0))
 
@@ -87,14 +88,19 @@
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
                       (when (and history (< history-index (length history)))
+                        ;; Save original input when first navigating into history
+                        (when (= history-index 0)
+                          (setf original-input input-buffer))
                         (incf history-index)
                         (setf input-buffer (nth (1- history-index) history))))
 
                      ;; Arrow Down key
                      ((string= escape-sequence "[B")
-                      (when (and history (> history-index 1))
+                      (when (and history (> history-index 0))
                         (decf history-index)
-                        (setf input-buffer (nth (1- history-index) history))))
+                        (if (= history-index 0)
+                            (setf input-buffer original-input)  ; Restore original input
+                            (setf input-buffer (nth (1- history-index) history)))))
 
                      ;; Standalone ESC - exit
                      ((string= escape-sequence "")
@@ -118,13 +124,17 @@
                        (when (> total-lines content-height)
                          (setf scroll-offset (- total-lines content-height)))))
 
-                   ;; Reset input buffer
-                   (setf input-buffer "")))
+                   ;; Reset input buffer and original input
+                   (setf input-buffer ""
+                         original-input "")))
 
                 ;; Backspace - remove character
                 ((or (char= char #\Backspace) (char= char #\Del))
                  (when (> (length input-buffer) 0)
-                   (setf input-buffer (subseq input-buffer 0 (1- (length input-buffer))))))
+                   (setf input-buffer (subseq input-buffer 0 (1- (length input-buffer))))
+                   ;; Reset history navigation since user is editing
+                   (setf history-index 0
+                         original-input input-buffer)))
 
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
@@ -134,7 +144,10 @@
 
                 ;; Regular characters - add to buffer
                 ((and (graphic-char-p char) (< (length input-buffer) 200))
-                 (setf input-buffer (concatenate 'string input-buffer (string char)))))))
+                 (setf input-buffer (concatenate 'string input-buffer (string char)))
+                 ;; Reset history navigation since user is editing
+                 (setf history-index 0
+                       original-input input-buffer)))))
 
         (error (e)
           (move-cursor (- rows 3) 1)
