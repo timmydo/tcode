@@ -16,6 +16,23 @@
   (ws_xpixel :unsigned-short)
   (ws_ypixel :unsigned-short))
 
+;; Terminal control constants
+(defconstant +TCGETS+ #x5401)
+(defconstant +TCSETS+ #x5402)
+(defconstant +ICANON+ #x0002)
+(defconstant +ECHO+ #x0008)
+(defconstant +VMIN+ 6)
+(defconstant +VTIME+ 5)
+
+;; Terminal structure for termios
+(cffi:defcstruct termios
+  (c_iflag :uint32)
+  (c_oflag :uint32)
+  (c_cflag :uint32)
+  (c_lflag :uint32)
+  (c_line :uint8)
+  (c_cc :uint8 :count 32))
+
 ;; CFFI bindings for PTY system calls
 (cffi:defcfun ("posix_openpt" %posix-openpt) :int
   (flags :int))
@@ -231,3 +248,105 @@
   "Clean up PTY resources"
   (kill-pty-process pty)
   (close-pty pty))
+
+;; Terminal control functions for curses-like interface
+(defun get-terminal-attributes (fd)
+  "Get terminal attributes for the given file descriptor"
+  (cffi:with-foreign-object (termios-ptr '(:struct termios))
+    (when (>= (%ioctl fd +TCGETS+ termios-ptr) 0)
+      termios-ptr)))
+
+(defun set-terminal-attributes (fd termios-ptr)
+  "Set terminal attributes for the given file descriptor"
+  (%ioctl fd +TCSETS+ termios-ptr))
+
+(defvar *original-termios* nil "Storage for original terminal settings")
+
+(defun enable-raw-mode (fd)
+  "Enable raw mode on terminal (disable canonical mode and echo)"
+  (unless *original-termios*
+    (setf *original-termios* (cffi:foreign-alloc '(:struct termios))))
+
+  (cffi:with-foreign-object (new-termios '(:struct termios))
+    (when (>= (%ioctl fd +TCGETS+ *original-termios*) 0)
+      ;; Copy original to new
+      (cffi:foreign-slot-value *original-termios* '(:struct termios) 'c_iflag)
+      (setf (cffi:foreign-slot-value new-termios '(:struct termios) 'c_iflag)
+            (cffi:foreign-slot-value *original-termios* '(:struct termios) 'c_iflag))
+      (setf (cffi:foreign-slot-value new-termios '(:struct termios) 'c_oflag)
+            (cffi:foreign-slot-value *original-termios* '(:struct termios) 'c_oflag))
+      (setf (cffi:foreign-slot-value new-termios '(:struct termios) 'c_cflag)
+            (cffi:foreign-slot-value *original-termios* '(:struct termios) 'c_cflag))
+      (setf (cffi:foreign-slot-value new-termios '(:struct termios) 'c_lflag)
+            (cffi:foreign-slot-value *original-termios* '(:struct termios) 'c_lflag))
+      (setf (cffi:foreign-slot-value new-termios '(:struct termios) 'c_line)
+            (cffi:foreign-slot-value *original-termios* '(:struct termios) 'c_line))
+
+      ;; Copy control characters
+      (loop for i from 0 below 32 do
+        (setf (cffi:mem-aref (cffi:foreign-slot-pointer new-termios '(:struct termios) 'c_cc) :uint8 i)
+              (cffi:mem-aref (cffi:foreign-slot-pointer *original-termios* '(:struct termios) 'c_cc) :uint8 i)))
+
+      (let ((lflag (cffi:foreign-slot-value new-termios '(:struct termios) 'c_lflag)))
+        ;; Disable canonical mode and echo
+        (setf (cffi:foreign-slot-value new-termios '(:struct termios) 'c_lflag)
+              (logand lflag (lognot (logior +ICANON+ +ECHO+))))
+        ;; Set VMIN=1, VTIME=0 for immediate character read
+        (setf (cffi:mem-aref (cffi:foreign-slot-pointer new-termios '(:struct termios) 'c_cc) :uint8 +VMIN+) 1)
+        (setf (cffi:mem-aref (cffi:foreign-slot-pointer new-termios '(:struct termios) 'c_cc) :uint8 +VTIME+) 0)
+        (set-terminal-attributes fd new-termios)
+        t))))
+
+(defun disable-raw-mode (fd &optional dummy)
+  "Restore original terminal attributes"
+  (declare (ignore dummy))
+  (when *original-termios*
+    (set-terminal-attributes fd *original-termios*)
+    (cffi:foreign-free *original-termios*)
+    (setf *original-termios* nil)))
+
+(defun read-char-raw ()
+  "Read a single character from stdin without waiting for newline"
+  (cffi:with-foreign-object (buffer :unsigned-char 1)
+    (loop
+      (let ((bytes-read (%read 0 buffer 1)))
+        (when (> bytes-read 0)
+          (return (code-char (cffi:mem-aref buffer :unsigned-char 0))))))))
+
+;; Terminal output functions
+(defun move-cursor (row col)
+  "Move cursor to specified position (1-based)"
+  (format t "~C[~D;~DH" #\Escape row col)
+  (force-output))
+
+(defun clear-screen ()
+  "Clear the entire screen"
+  (format t "~C[2J" #\Escape)
+  (move-cursor 1 1))
+
+(defun clear-line ()
+  "Clear the current line"
+  (format t "~C[2K" #\Escape)
+  (force-output))
+
+(defun save-cursor ()
+  "Save current cursor position"
+  (format t "~C[s" #\Escape)
+  (force-output))
+
+(defun restore-cursor ()
+  "Restore saved cursor position"
+  (format t "~C[u" #\Escape)
+  (force-output))
+
+(defun set-color (fg &optional bg)
+  "Set foreground and optionally background color"
+  (if bg
+      (format t "~C[~D;~Dm" #\Escape (+ 30 fg) (+ 40 bg))
+      (format t "~C[~Dm" #\Escape (+ 30 fg)))
+  (force-output))
+
+(defun reset-color ()
+  "Reset colors to default"
+  (format t "~C[0m" #\Escape)
+  (force-output))
