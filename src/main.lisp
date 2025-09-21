@@ -37,46 +37,49 @@
       (disable-raw-mode 0)
       (cleanup-pty pty)))))
 
+(defstruct repl-context
+  (input-buffer "")
+  (history '())
+  (results '())
+  (history-index 0)
+  (original-input "")
+  (content-height 0)
+  (scroll-offset 0)
+  (status-message "")
+  (ctrl-c-pressed nil))
+
 (defun repl-loop (pty rows cols)
   "Main REPL loop with fixed prompt at bottom and scrollable history above"
   (declare (ignore pty))  ; PTY not used in current implementation
-  (let ((input-buffer "")
-        (history '())
-        (results '())
-        (history-index 0)
-        (original-input "")  ; Store the original input when history navigation starts
-        (content-height (- rows 4))  ; Reserve 4 lines for prompt area and status
-        (scroll-offset 0)
-        (status-message "")
-        (ctrl-c-pressed nil))
+  (let ((ctx (make-repl-context :content-height (- rows 4))))
 
     ;; Initial screen setup
     (clear-screen)
-    (draw-bottom-interface rows cols input-buffer status-message)
+    (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-status-message ctx))
 
     (loop
       (handler-case
           (progn
             ;; Draw the content area with history and results
-            (draw-content-area content-height history results scroll-offset cols)
+            (draw-content-area (repl-context-content-height ctx) (repl-context-history ctx) (repl-context-results ctx) (repl-context-scroll-offset ctx) cols)
 
             ;; Update prompt area
-            (draw-bottom-interface rows cols input-buffer status-message)
+            (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-status-message ctx))
 
             ;; Read character
             (let ((char (read-char-raw)))
               (cond
                 ;; Ctrl+C - handle double press to exit
                 ((char= char (code-char 3))
-                 (if ctrl-c-pressed
+                 (if (repl-context-ctrl-c-pressed ctx)
                      (progn
                        ;; Clear screen and reset cursor before exiting
                        (clear-screen)
                        (move-cursor 1 1)
                        (return))  ; Exit on second Ctrl+C
                      (progn
-                       (setf ctrl-c-pressed t
-                             status-message "Press Ctrl-C again to exit..."))))
+                       (setf (repl-context-ctrl-c-pressed ctx) t
+                             (repl-context-status-message ctx) "Press Ctrl-C again to exit..."))))
 
                 ;; ESC sequence handling
                 ((char= char (code-char 27))
@@ -84,53 +87,53 @@
                    (cond
                      ;; Page Up key - scroll up to see older entries
                      ((string= escape-sequence "[5~")
-                      (let* ((total-entries (length history))
-                             (entries-that-fit (floor content-height 3))
+                      (let* ((total-entries (length (repl-context-history ctx)))
+                             (entries-that-fit (floor (repl-context-content-height ctx) 3))
                              (max-scroll (max 0 (- total-entries entries-that-fit))))
                         (when (> total-entries entries-that-fit)
-                          (setf scroll-offset (min max-scroll (+ scroll-offset 3))))))
+                          (setf (repl-context-scroll-offset ctx) (min max-scroll (+ (repl-context-scroll-offset ctx) 3))))))
 
                      ;; Page Down key - scroll down to see newer entries
                      ((string= escape-sequence "[6~")
-                      (setf scroll-offset (max 0 (- scroll-offset 3))))
+                      (setf (repl-context-scroll-offset ctx) (max 0 (- (repl-context-scroll-offset ctx) 3))))
 
                      ;; Home key - scroll to top (oldest entries)
                      ;; Various terminals send different sequences for Home
                      ((or (string= escape-sequence "[H")
                           (string= escape-sequence "[1~")
                           (string= escape-sequence "[7~"))
-                      (let* ((total-entries (length history))
-                             (entries-that-fit (floor content-height 3))
+                      (let* ((total-entries (length (repl-context-history ctx)))
+                             (entries-that-fit (floor (repl-context-content-height ctx) 3))
                              (max-scroll (max 0 (- total-entries entries-that-fit))))
-                        (setf scroll-offset max-scroll)))
+                        (setf (repl-context-scroll-offset ctx) max-scroll)))
 
                      ;; End key - scroll to bottom (newest entries)
                      ;; Various terminals send different sequences for End
                      ((or (string= escape-sequence "[F")
                           (string= escape-sequence "[4~")
                           (string= escape-sequence "[8~"))
-                      (setf scroll-offset 0))
+                      (setf (repl-context-scroll-offset ctx) 0))
 
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
-                      (when (and history (< history-index (length history)))
+                      (when (and (repl-context-history ctx) (< (repl-context-history-index ctx) (length (repl-context-history ctx))))
                         ;; Save original input when first navigating into history
-                        (when (= history-index 0)
-                          (setf original-input input-buffer))
-                        (incf history-index)
-                        (setf input-buffer (nth (1- history-index) history)
-                              ctrl-c-pressed nil  ; Reset Ctrl+C state
-                              status-message "")))
+                        (when (= (repl-context-history-index ctx) 0)
+                          (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
+                        (incf (repl-context-history-index ctx))
+                        (setf (repl-context-input-buffer ctx) (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx))
+                              (repl-context-ctrl-c-pressed ctx) nil
+                              (repl-context-status-message ctx) "")))
 
                      ;; Arrow Down key
                      ((string= escape-sequence "[B")
-                      (when (and history (> history-index 0))
-                        (decf history-index)
-                        (if (= history-index 0)
-                            (setf input-buffer original-input)  ; Restore original input
-                            (setf input-buffer (nth (1- history-index) history)))
-                        (setf ctrl-c-pressed nil  ; Reset Ctrl+C state
-                              status-message "")))
+                      (when (and (repl-context-history ctx) (> (repl-context-history-index ctx) 0))
+                        (decf (repl-context-history-index ctx))
+                        (if (= (repl-context-history-index ctx) 0)
+                            (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
+                            (setf (repl-context-input-buffer ctx) (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx))))
+                        (setf (repl-context-ctrl-c-pressed ctx) nil
+                              (repl-context-status-message ctx) "")))
 
                      ;; Standalone ESC - exit
                      ((string= escape-sequence "")
@@ -140,7 +143,7 @@
 
                 ;; Enter - process input
                 ((or (char= char #\Return) (char= char #\Newline))
-                 (let ((trimmed-input (string-trim " " input-buffer)))
+                 (let ((trimmed-input (string-trim " " (repl-context-input-buffer ctx))))
                    (when (string= trimmed-input "exit")
                      (clear-screen)
                      (move-cursor 1 1)
@@ -148,46 +151,46 @@
 
                    (when (> (length trimmed-input) 0)
                      ;; Add to history and evaluate
-                     (push trimmed-input history)
+                     (push trimmed-input (repl-context-history ctx))
                      (let ((result (safe-eval-string trimmed-input)))
-                       (push result results))
-                     (setf history-index 0)
+                       (push result (repl-context-results ctx)))
+                     (setf (repl-context-history-index ctx) 0)
 
                      ;; Auto-scroll to show latest (scroll to bottom)
-                     (setf scroll-offset 0)))
+                     (setf (repl-context-scroll-offset ctx) 0)))
 
                    ;; Reset input buffer and original input
-                   (setf input-buffer ""
-                         original-input ""
-                         ctrl-c-pressed nil  ; Reset Ctrl+C state
-                         status-message ""))
+                   (setf (repl-context-input-buffer ctx) ""
+                         (repl-context-original-input ctx) ""
+                         (repl-context-ctrl-c-pressed ctx) nil
+                         (repl-context-status-message ctx) ""))
 
                 ;; Backspace - remove character
                 ((or (char= char #\Backspace) (char= char #\Del))
-                 (when (> (length input-buffer) 0)
-                   (setf input-buffer (subseq input-buffer 0 (1- (length input-buffer))))
+                 (when (> (length (repl-context-input-buffer ctx)) 0)
+                   (setf (repl-context-input-buffer ctx) (subseq (repl-context-input-buffer ctx) 0 (1- (length (repl-context-input-buffer ctx)))))
                    ;; Reset history navigation since user is editing
-                   (setf history-index 0
-                         original-input input-buffer
-                         ctrl-c-pressed nil  ; Reset Ctrl+C state
-                         status-message "")))
+                   (setf (repl-context-history-index ctx) 0
+                         (repl-context-original-input ctx) (repl-context-input-buffer ctx)
+                         (repl-context-ctrl-c-pressed ctx) nil
+                         (repl-context-status-message ctx) "")))
 
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
-                 (setf history '()
-                       results '()
-                       scroll-offset 0
-                       ctrl-c-pressed nil  ; Reset Ctrl+C state
-                       status-message ""))
+                 (setf (repl-context-history ctx) '()
+                       (repl-context-results ctx) '()
+                       (repl-context-scroll-offset ctx) 0
+                       (repl-context-ctrl-c-pressed ctx) nil
+                       (repl-context-status-message ctx) ""))
 
                 ;; Regular characters - add to buffer
-                ((and (graphic-char-p char) (< (length input-buffer) 200))
-                 (setf input-buffer (concatenate 'string input-buffer (string char)))
+                ((and (graphic-char-p char) (< (length (repl-context-input-buffer ctx)) 200))
+                 (setf (repl-context-input-buffer ctx) (concatenate 'string (repl-context-input-buffer ctx) (string char)))
                  ;; Reset history navigation since user is editing
-                 (setf history-index 0
-                       original-input input-buffer
-                       ctrl-c-pressed nil  ; Reset Ctrl+C state on any other input
-                       status-message "")))))
+                 (setf (repl-context-history-index ctx) 0
+                       (repl-context-original-input ctx) (repl-context-input-buffer ctx)
+                       (repl-context-ctrl-c-pressed ctx) nil
+                       (repl-context-status-message ctx) "")))))
 
 
         (error (e)
