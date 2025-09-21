@@ -3,7 +3,8 @@
 
 (defun main ()
   "Main entry point for tcode - creates a PTY-based terminal with curses-like interface"
-  (let ((pty (make-pty :width 80 :height 24)))
+  (multiple-value-bind (rows cols) (get-terminal-size)
+    (let ((pty (make-pty :width cols :height rows)))
     (unwind-protect
         (handler-case
             (progn
@@ -23,10 +24,10 @@
               (move-cursor 4 1)
 
               ;; Start the main REPL loop
-              (repl-loop pty))
+              (repl-loop pty rows cols))
 
           (error (e)
-            (move-cursor 20 1)
+            (move-cursor (- rows 4) 1)
             (set-color 1) ; Red
             (format t "Error in main: ~A" e)
             (reset-color)))
@@ -34,23 +35,32 @@
       ;; Always cleanup, even on errors
       (disable-raw-mode 0)
       (cleanup-pty pty)
-      (move-cursor 22 1)
+      (move-cursor (- rows 2) 1)
       (format t "Shutting down...")
-      (move-cursor 23 1))))
+      (move-cursor (1- rows) 1)))))
 
-(defun repl-loop (pty)
-  "Main REPL loop with curses-like interface"
+(defun repl-loop (pty rows cols)
+  "Main REPL loop with fixed prompt at bottom and scrollable history above"
+  (declare (ignore pty))  ; PTY not used in current implementation
   (let ((input-buffer "")
-        (cursor-row 5)
-        (prompt-col 8)
         (history '())
-        (history-index 0))
+        (results '())
+        (history-index 0)
+        (content-height (- rows 3))  ; Reserve 3 lines for prompt area
+        (scroll-offset 0))
+
+    ;; Initial screen setup
+    (clear-screen)
+    (draw-bottom-interface rows cols input-buffer)
 
     (loop
       (handler-case
           (progn
-            ;; Display prompt and current input
-            (display-prompt-line cursor-row input-buffer prompt-col)
+            ;; Draw the content area with history and results
+            (draw-content-area content-height history results scroll-offset)
+
+            ;; Update prompt area
+            (draw-bottom-interface rows cols input-buffer)
 
             ;; Read character
             (let ((char (read-char-raw)))
@@ -66,18 +76,18 @@
                      (return))
 
                    (when (> (length trimmed-input) 0)
-                     ;; Add to history
+                     ;; Add to history and evaluate
                      (push trimmed-input history)
+                     (let ((result (safe-eval-string trimmed-input)))
+                       (push result results))
                      (setf history-index 0)
 
-                     ;; Evaluate and display result
-                     (let ((result (safe-eval-string trimmed-input)))
-                       (display-result cursor-row result)))
+                     ;; Auto-scroll to show latest
+                     (let ((total-lines (length history)))
+                       (when (> total-lines content-height)
+                         (setf scroll-offset (- total-lines content-height)))))
 
-                   ;; Move to next line and reset
-                   (incf cursor-row 3)
-                   (when (> cursor-row 20)
-                     (setf cursor-row 5))
+                   ;; Reset input buffer
                    (setf input-buffer "")))
 
                 ;; Backspace - remove character
@@ -96,53 +106,97 @@
                    (decf history-index)
                    (setf input-buffer (nth (1- history-index) history))))
 
-                ;; Ctrl+L to clear screen
+                ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
-                 (clear-screen)
-                 (move-cursor 1 1)
-                 (set-color 2)
-                 (format t "tcode - Terminal-based CLI")
-                 (reset-color)
-                 (move-cursor 2 1)
-                 (format t "PTY session active. Type 'exit' or Ctrl+C to quit."))
+                 (setf history '()
+                       results '()
+                       scroll-offset 0))
+
+                ;; Page Up/Page Down for scrolling
+                ((char= char (code-char 5)) ; Ctrl+E - scroll down
+                 (when (> scroll-offset 0)
+                   (decf scroll-offset)))
+
+                ((char= char (code-char 25)) ; Ctrl+Y - scroll up
+                 (let ((total-lines (length history)))
+                   (when (< scroll-offset (max 0 (- total-lines content-height)))
+                     (incf scroll-offset))))
 
                 ;; Regular characters - add to buffer
                 ((and (graphic-char-p char) (< (length input-buffer) 200))
                  (setf input-buffer (concatenate 'string input-buffer (string char)))))))
 
         (error (e)
-          (move-cursor 21 1)
+          (move-cursor (- rows 3) 1)
           (set-color 1) ; Red
           (format t "Error: ~A" e)
-          (reset-color)
-          (move-cursor cursor-row 1))))))
+          (reset-color))))))
 
-(defun display-prompt-line (row input-buffer prompt-col)
-  "Display the command prompt with current input"
+(defun draw-horizontal-line (row cols)
+  "Draw a horizontal separator line"
   (move-cursor row 1)
+  (format t "~C[90m" #\Escape) ; Gray color directly
+  (format t "~A" (make-string cols :initial-element #\-))
+  (reset-color))
+
+(defun draw-bottom-interface (rows cols input-buffer)
+  "Draw the fixed prompt interface at the bottom"
+  ;; Top separator line
+  (draw-horizontal-line (- rows 2) cols)
+
+  ;; Prompt line
+  (move-cursor (- rows 1) 1)
   (clear-line)
   (set-color 6) ; Cyan
   (format t "tcode> ")
   (reset-color)
   (format t "~A" input-buffer)
-  ;; Show cursor
-  (format t "_")
+  (format t "_") ; cursor
+
+  ;; Bottom separator line
+  (draw-horizontal-line rows cols)
   (force-output))
 
-(defun display-result (row result)
-  "Display the evaluation result"
-  (move-cursor (1+ row) 1)
-  (clear-line)
-  (set-color 3) ; Yellow
-  (format t "=> ")
-  (reset-color)
-  (format t "~A" result)
-  (force-output))
+(defun draw-content-area (content-height history results scroll-offset)
+  "Draw the scrollable content area with history and results"
+  (let ((display-start (max 0 scroll-offset))
+        (display-end (min (length history) (+ scroll-offset content-height)))
+        (current-row 1))
 
-(defun print-separator ()
-  "Print a gray separator line"
-  ;; Using ANSI escape codes for gray color
-  (format t "~C[90m~A~C[0m~%" #\Escape (make-string 60 :initial-element #\-) #\Escape))
+    ;; Clear the content area
+    (loop for row from 1 to content-height do
+      (move-cursor row 1)
+      (clear-line))
+
+    ;; Display visible history entries and their results
+    (loop for i from display-start below display-end
+          for hist-item = (nth (- (length history) 1 i) history)
+          for result-item = (nth (- (length results) 1 i) results)
+          do
+          (when (<= current-row content-height)
+            ;; Display command
+            (move-cursor current-row 1)
+            (set-color 6) ; Cyan
+            (format t "tcode> ")
+            (reset-color)
+            (format t "~A" hist-item)
+            (incf current-row))
+
+          (when (and result-item (<= current-row content-height))
+            ;; Display result
+            (move-cursor current-row 1)
+            (set-color 3) ; Yellow
+            (format t "=> ")
+            (reset-color)
+            (format t "~A" result-item)
+            (incf current-row))
+
+          ;; Add blank line between entries if space allows
+          (when (<= current-row content-height)
+            (incf current-row)))
+
+    (force-output)))
+
 
 (defun safe-eval-string (input-string)
   "Safely evaluate a Lisp expression from string"

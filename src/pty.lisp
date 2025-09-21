@@ -8,6 +8,7 @@
 (defconstant +o-rdwr+ #x02)
 (defconstant +o-noctty+ #x100)
 (defconstant +tiocswinsz+ #x5414)
+(defconstant +tiocgwinsz+ #x5413)
 
 ;; Structure for terminal window size
 (cffi:defcstruct winsize
@@ -350,3 +351,11 @@
   "Reset colors to default"
   (format t "~C[0m" #\Escape)
   (force-output))
+
+(defun get-terminal-size ()
+  "Get the current terminal size as (rows columns)"
+  (cffi:with-foreign-object (ws '(:struct winsize))
+    (if (>= (%ioctl 1 +tiocgwinsz+ ws) 0)  ; stdout fd = 1
+        (values (cffi:foreign-slot-value ws '(:struct winsize) 'ws_row)
+                (cffi:foreign-slot-value ws '(:struct winsize) 'ws_col))
+        (values 24 80))))  ; fallback to default size
