@@ -234,11 +234,14 @@
     ;; Higher scroll-offset means show older entries
     (when (> total-entries 0)
       (let* ((entries-that-fit (floor content-height 3)) ; Each entry takes ~3 lines (cmd + result + blank)
-             (start-index (max 0 (- total-entries entries-that-fit scroll-offset)))
-             (end-index total-entries))
+             ;; Since history is newest-first (push adds to front), we need to reverse indexing
+             ;; When scroll-offset=0, show entries from 0 to entries-that-fit (newest)
+             ;; When scroll-offset>0, show older entries
+             (start-index scroll-offset)
+             (end-index (min total-entries (+ scroll-offset entries-that-fit))))
 
         ;; Display visible history entries and their results
-        (loop for i from start-index below end-index
+        (loop for i from (1- end-index) downto start-index
               for hist-item = (nth i history)
               for result-item = (nth i results)
               do
@@ -292,8 +295,9 @@
         ;; Calculate thumb position and size
         (let* ((thumb-size (max 1 (floor (* scrollbar-height entries-that-fit) total-entries)))
                (scrollable-range (- scrollbar-height thumb-size))
+               ;; Reverse the thumb position since scroll-offset=0 should show thumb at bottom (newest)
                (thumb-position (if (> total-scrollable 0)
-                                 (floor (* scrollable-range scroll-offset) total-scrollable)
+                                 (- scrollable-range (floor (* scrollable-range scroll-offset) total-scrollable))
                                  0)))
 
           ;; Draw scroll track (background)
