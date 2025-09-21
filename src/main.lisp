@@ -94,6 +94,23 @@
                      ((string= escape-sequence "[6~")
                       (setf scroll-offset (max 0 (- scroll-offset 3))))
 
+                     ;; Home key - scroll to top (oldest entries)
+                     ;; Various terminals send different sequences for Home
+                     ((or (string= escape-sequence "[H")
+                          (string= escape-sequence "[1~")
+                          (string= escape-sequence "[7~"))
+                      (let* ((total-entries (length history))
+                             (entries-that-fit (floor content-height 3))
+                             (max-scroll (max 0 (- total-entries entries-that-fit))))
+                        (setf scroll-offset max-scroll)))
+
+                     ;; End key - scroll to bottom (newest entries)
+                     ;; Various terminals send different sequences for End
+                     ((or (string= escape-sequence "[F")
+                          (string= escape-sequence "[4~")
+                          (string= escape-sequence "[8~"))
+                      (setf scroll-offset 0))
+
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
                       (when (and history (< history-index (length history)))
@@ -137,9 +154,7 @@
                      (setf history-index 0)
 
                      ;; Auto-scroll to show latest (scroll to bottom)
-                     (let ((total-lines (length history)))
-                       (when (> total-lines content-height)
-                         (setf scroll-offset 0)))))
+                     (setf scroll-offset 0)))
 
                    ;; Reset input buffer and original input
                    (setf input-buffer ""

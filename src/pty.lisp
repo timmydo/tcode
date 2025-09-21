@@ -338,10 +338,17 @@
                  ((string= sequence "[5~") (return sequence))
                  ;; Page Down: ESC[6~
                  ((string= sequence "[6~") (return sequence))
+                 ;; Home: ESC[1~ (some terminals) or ESC[7~ (some terminals)
+                 ((string= sequence "[1~") (return sequence))
+                 ((string= sequence "[7~") (return sequence))
+                 ;; End: ESC[4~ (some terminals) or ESC[8~ (some terminals)
+                 ((string= sequence "[4~") (return sequence))
+                 ((string= sequence "[8~") (return sequence))
                  ;; Arrow keys: ESC[A, ESC[B, ESC[C, ESC[D
+                 ;; Home/End keys: ESC[H, ESC[F
                  ((and (>= (length sequence) 2)
                        (char= (char sequence 0) #\[)
-                       (member (char sequence 1) '(#\A #\B #\C #\D)))
+                       (member (char sequence 1) '(#\A #\B #\C #\D #\H #\F)))
                   (return sequence))
                  ;; If sequence gets too long, assume it's not what we're looking for
                  ((> (length sequence) 10) (return sequence)))))

@@ -9,7 +9,7 @@ tcode is a terminal-based CLI for coding
 ## Development Commands
 
 ### Building and Running
-- **Quick start**: `./start.sh` - convenience script to start
+- **IMPORTANT**: Do NOT run `./start.sh` as it takes over the Claude Code PTY and cannot be killed easily
 - **Entry point**: `src/main.lisp` contains the main function
 
 ### Testing
