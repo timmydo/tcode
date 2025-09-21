@@ -314,6 +314,41 @@
         (when (> bytes-read 0)
           (return (code-char (cffi:mem-aref buffer :unsigned-char 0))))))))
 
+(defun read-escape-sequence ()
+  "Read the remainder of an escape sequence after ESC has been read"
+  (cffi:with-foreign-object (buffer :unsigned-char 1)
+    (let ((sequence "")
+          (timeout-counter 0)
+          (max-timeout 10)) ; Small timeout to distinguish standalone ESC from escape sequences
+      (loop
+        (let ((bytes-read (%read 0 buffer 1)))
+          (cond
+            ((> bytes-read 0)
+             (let ((char (code-char (cffi:mem-aref buffer :unsigned-char 0))))
+               (setf sequence (concatenate 'string sequence (string char)))
+               (setf timeout-counter 0)
+               ;; Check if we have a complete sequence
+               (cond
+                 ;; Page Up: ESC[5~
+                 ((string= sequence "[5~") (return sequence))
+                 ;; Page Down: ESC[6~
+                 ((string= sequence "[6~") (return sequence))
+                 ;; Arrow keys: ESC[A, ESC[B, ESC[C, ESC[D
+                 ((and (>= (length sequence) 2)
+                       (char= (char sequence 0) #\[)
+                       (member (char sequence 1) '(#\A #\B #\C #\D)))
+                  (return sequence))
+                 ;; If sequence gets too long, assume it's not what we're looking for
+                 ((> (length sequence) 10) (return sequence)))))
+            (t
+             ;; No more data available - increment timeout
+             (incf timeout-counter)
+             (when (> timeout-counter max-timeout)
+               ;; Timeout reached - likely standalone ESC
+               (return sequence))
+             ;; Small delay before next check
+             (sleep 0.001))))))))
+
 ;; Terminal output functions
 (defun move-cursor (row col)
   "Move cursor to specified position (1-based)"

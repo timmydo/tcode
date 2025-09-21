@@ -65,9 +65,40 @@
             ;; Read character
             (let ((char (read-char-raw)))
               (cond
-                ;; Ctrl+C or ESC - exit
-                ((or (char= char (code-char 3)) (char= char (code-char 27)))
+                ;; Ctrl+C - exit
+                ((char= char (code-char 3))
                  (return))
+
+                ;; ESC sequence handling
+                ((char= char (code-char 27))
+                 (let ((escape-sequence (read-escape-sequence)))
+                   (cond
+                     ;; Page Up key
+                     ((string= escape-sequence "[5~")
+                      (let ((total-lines (length history)))
+                        (when (< scroll-offset (max 0 (- total-lines content-height)))
+                          (incf scroll-offset))))
+
+                     ;; Page Down key
+                     ((string= escape-sequence "[6~")
+                      (when (> scroll-offset 0)
+                        (decf scroll-offset)))
+
+                     ;; Arrow Up key
+                     ((string= escape-sequence "[A")
+                      (when (and history (< history-index (length history)))
+                        (incf history-index)
+                        (setf input-buffer (nth (1- history-index) history))))
+
+                     ;; Arrow Down key
+                     ((string= escape-sequence "[B")
+                      (when (and history (> history-index 1))
+                        (decf history-index)
+                        (setf input-buffer (nth (1- history-index) history))))
+
+                     ;; Standalone ESC - exit
+                     ((string= escape-sequence "")
+                      (return)))))
 
                 ;; Enter - process input
                 ((or (char= char #\Return) (char= char #\Newline))
@@ -95,32 +126,11 @@
                  (when (> (length input-buffer) 0)
                    (setf input-buffer (subseq input-buffer 0 (1- (length input-buffer))))))
 
-                ;; Ctrl+P/Ctrl+N for history (up/down)
-                ((char= char (code-char 16)) ; Ctrl+P - Previous (up) in history
-                 (when (and history (< history-index (length history)))
-                   (incf history-index)
-                   (setf input-buffer (nth (1- history-index) history))))
-
-                ((char= char (code-char 14)) ; Ctrl+N - Next (down) in history
-                 (when (and history (> history-index 1))
-                   (decf history-index)
-                   (setf input-buffer (nth (1- history-index) history))))
-
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
                  (setf history '()
                        results '()
                        scroll-offset 0))
-
-                ;; Page Up/Page Down for scrolling
-                ((char= char (code-char 5)) ; Ctrl+E - scroll down
-                 (when (> scroll-offset 0)
-                   (decf scroll-offset)))
-
-                ((char= char (code-char 25)) ; Ctrl+Y - scroll up
-                 (let ((total-lines (length history)))
-                   (when (< scroll-offset (max 0 (- total-lines content-height)))
-                     (incf scroll-offset))))
 
                 ;; Regular characters - add to buffer
                 ((and (graphic-char-p char) (< (length input-buffer) 200))
@@ -151,7 +161,8 @@
   (format t "tcode> ")
   (reset-color)
   (format t "~A" input-buffer)
-  (format t "_") ; cursor
+  ;; White rectangle cursor
+  (format t "~C[47m ~C[0m" #\Escape #\Escape)
 
   ;; Bottom separator line
   (draw-horizontal-line rows cols)
