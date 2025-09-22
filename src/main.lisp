@@ -43,6 +43,7 @@
 
 (defstruct repl-context
   (input-buffer "")
+  (cursor-position 0)  ; Position within input-buffer (0 = beginning)
   (history '())
   (history-index 0)
   (original-input "")
@@ -59,7 +60,7 @@
 
     ;; Initial screen setup
     (clear-screen)
-    (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-status-message ctx))
+    (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-cursor-position ctx) (repl-context-status-message ctx))
 
     (loop
       (handler-case
@@ -68,7 +69,7 @@
             (draw-content-area (repl-context-content-height ctx) (repl-context-history ctx) (repl-context-scroll-offset ctx) cols)
 
             ;; Update prompt area
-            (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-status-message ctx))
+            (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-cursor-position ctx) (repl-context-status-message ctx))
 
             ;; Read character
             (let ((char (read-char-raw)))
@@ -84,6 +85,18 @@
                      (progn
                        (setf (repl-context-state ctx) :exit-warning
                              (repl-context-status-message ctx) "Press Ctrl-C again to exit..."))))
+
+                ;; Ctrl+A - move cursor to beginning
+                ((char= char (code-char 1))
+                 (setf (repl-context-cursor-position ctx) 0
+                       (repl-context-state ctx) :normal
+                       (repl-context-status-message ctx) ""))
+
+                ;; Ctrl+E - move cursor to end
+                ((char= char (code-char 5))
+                 (setf (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
+                       (repl-context-state ctx) :normal
+                       (repl-context-status-message ctx) ""))
 
                 ;; ESC sequence handling
                 ((char= char (code-char 27))
@@ -101,22 +114,23 @@
                      ((string= escape-sequence "[6~")
                       (setf (repl-context-scroll-offset ctx) (max 0 (- (repl-context-scroll-offset ctx) 3))))
 
-                     ;; Home key - scroll to top (oldest entries)
+                     ;; Home key - move cursor to beginning of line
                      ;; Various terminals send different sequences for Home
                      ((or (string= escape-sequence "[H")
                           (string= escape-sequence "[1~")
                           (string= escape-sequence "[7~"))
-                      (let* ((total-entries (length (repl-context-history ctx)))
-                             (entries-that-fit (floor (repl-context-content-height ctx) 3))
-                             (max-scroll (max 0 (- total-entries entries-that-fit))))
-                        (setf (repl-context-scroll-offset ctx) max-scroll)))
+                      (setf (repl-context-cursor-position ctx) 0
+                            (repl-context-state ctx) :normal
+                            (repl-context-status-message ctx) ""))
 
-                     ;; End key - scroll to bottom (newest entries)
+                     ;; End key - move cursor to end of line
                      ;; Various terminals send different sequences for End
                      ((or (string= escape-sequence "[F")
                           (string= escape-sequence "[4~")
                           (string= escape-sequence "[8~"))
-                      (setf (repl-context-scroll-offset ctx) 0))
+                      (setf (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
+                            (repl-context-state ctx) :normal
+                            (repl-context-status-message ctx) ""))
 
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
@@ -126,6 +140,7 @@
                           (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
                         (incf (repl-context-history-index ctx))
                         (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))
+                              (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
                               (repl-context-state ctx) :normal
                               (repl-context-status-message ctx) "")))
 
@@ -136,6 +151,21 @@
                         (if (= (repl-context-history-index ctx) 0)
                             (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
                             (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
+                        (setf (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
+                              (repl-context-state ctx) :normal
+                              (repl-context-status-message ctx) "")))
+
+                     ;; Arrow Left key
+                     ((string= escape-sequence "[D")
+                      (when (> (repl-context-cursor-position ctx) 0)
+                        (decf (repl-context-cursor-position ctx))
+                        (setf (repl-context-state ctx) :normal
+                              (repl-context-status-message ctx) "")))
+
+                     ;; Arrow Right key
+                     ((string= escape-sequence "[C")
+                      (when (< (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx)))
+                        (incf (repl-context-cursor-position ctx))
                         (setf (repl-context-state ctx) :normal
                               (repl-context-status-message ctx) "")))
 
@@ -157,10 +187,17 @@
                      ;; Evaluate and handle all context updates
                      (submit-command trimmed-input ctx))))
 
-                ;; Backspace - remove character
+                ;; Backspace - remove character to the left of cursor
                 ((or (char= char #\Backspace) (char= char #\Del))
-                 (when (> (length (repl-context-input-buffer ctx)) 0)
-                   (setf (repl-context-input-buffer ctx) (subseq (repl-context-input-buffer ctx) 0 (1- (length (repl-context-input-buffer ctx)))))
+                 (when (and (> (length (repl-context-input-buffer ctx)) 0)
+                            (> (repl-context-cursor-position ctx) 0))
+                   (let* ((current-buffer (repl-context-input-buffer ctx))
+                          (cursor-pos (repl-context-cursor-position ctx))
+                          (before (subseq current-buffer 0 (1- cursor-pos)))
+                          (after (subseq current-buffer cursor-pos))
+                          (new-buffer (concatenate 'string before after)))
+                     (setf (repl-context-input-buffer ctx) new-buffer
+                           (repl-context-cursor-position ctx) (1- cursor-pos)))
                    ;; Reset history navigation since user is editing
                    (setf (repl-context-history-index ctx) 0
                          (repl-context-original-input ctx) (repl-context-input-buffer ctx)
@@ -174,9 +211,15 @@
                        (repl-context-state ctx) :normal
                        (repl-context-status-message ctx) ""))
 
-                ;; Regular characters - add to buffer
+                ;; Regular characters - insert at cursor position
                 ((and (graphic-char-p char) (< (length (repl-context-input-buffer ctx)) 200))
-                 (setf (repl-context-input-buffer ctx) (concatenate 'string (repl-context-input-buffer ctx) (string char)))
+                 (let* ((current-buffer (repl-context-input-buffer ctx))
+                        (cursor-pos (repl-context-cursor-position ctx))
+                        (before (subseq current-buffer 0 cursor-pos))
+                        (after (subseq current-buffer cursor-pos))
+                        (new-buffer (concatenate 'string before (string char) after)))
+                   (setf (repl-context-input-buffer ctx) new-buffer
+                         (repl-context-cursor-position ctx) (1+ cursor-pos)))
                  ;; Reset history navigation since user is editing
                  (setf (repl-context-history-index ctx) 0
                        (repl-context-original-input ctx) (repl-context-input-buffer ctx)
@@ -197,7 +240,7 @@
   (format t "~A" (make-string cols :initial-element #\─))  ; Unicode horizontal line
   (reset-color))
 
-(defun draw-bottom-interface (rows cols input-buffer status-message)
+(defun draw-bottom-interface (rows cols input-buffer cursor-position status-message)
   "Draw the fixed prompt interface at the bottom with status line"
   ;; Top separator line
   (draw-horizontal-line (- rows 3) cols)
@@ -208,9 +251,18 @@
   (set-color 6) ; Cyan
   (format t "tcode> ")
   (reset-color)
-  (format t "~A" input-buffer)
-  ;; White rectangle cursor
-  (format t "~C[47m ~C[0m" #\Escape #\Escape)
+
+  ;; Draw input buffer with cursor in the correct position
+  (let ((before-cursor (subseq input-buffer 0 cursor-position))
+        (after-cursor (subseq input-buffer cursor-position)))
+    (format t "~A" before-cursor)
+    ;; White rectangle cursor
+    (format t "~C[47m~A~C[0m" #\Escape
+            (if (< cursor-position (length input-buffer))
+                (char input-buffer cursor-position)
+                #\Space)
+            #\Escape)
+    (format t "~A" after-cursor))
 
   ;; Bottom separator line
   (draw-horizontal-line (- rows 1) cols)
@@ -223,8 +275,8 @@
     (format t "~A" status-message)
     (reset-color))
 
-  ;; Move cursor back to prompt area and hide it
-  (move-cursor (- rows 2) (+ 8 (length input-buffer)))
+  ;; Move cursor back to prompt area and position it correctly
+  (move-cursor (- rows 2) (+ 8 cursor-position))
   (force-output))
 
 (defun draw-content-area (content-height history scroll-offset cols)

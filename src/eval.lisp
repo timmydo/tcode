@@ -64,6 +64,7 @@
     (setf (repl-context-history-index ctx) 0
           (repl-context-scroll-offset ctx) 0
           (repl-context-input-buffer ctx) ""
+          (repl-context-cursor-position ctx) 0
           (repl-context-original-input ctx) ""
           (repl-context-state ctx) :normal)
 
