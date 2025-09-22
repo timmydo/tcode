@@ -8,6 +8,7 @@
   :serial t
   :components (
                (:file "tcode-package")
+               (:file "backend")
                (:file "pty")
                (:file "config")
                (:file "eval")

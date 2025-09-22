@@ -1,9 +1,18 @@
 (in-package :tcode)
 
 (defparameter *config-template*
-  ";; tcode configuration file
+  "(in-package :tcode)
+
+;; tcode configuration file
 ;; This file is loaded at startup and can contain any valid Common Lisp code.
 ;; You can define variables, functions, and customize the behavior of tcode.
+
+;; Backend configuration
+;; Replace \"enter-api-key-here\" with your actual OpenRouter API key
+(defvar *tcode-backend* (make-openrouter-connection \"enter-api-key-here\"))
+
+;; Default model for OpenRouter
+(defvar *openrouter-default-model* \"x-ai/grok-4-fast:free\")
 
 ;; Example: Set a custom prompt color
 ;; (defparameter *custom-prompt-color* 6)

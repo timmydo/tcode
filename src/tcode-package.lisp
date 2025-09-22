@@ -4,4 +4,7 @@
 
 (defpackage #:tcode
   (:use :cl)
-  (:export #:main))
+  (:export #:main
+           #:backend-connection
+           #:openrouter-connection
+           #:make-openrouter-connection))
