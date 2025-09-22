@@ -11,6 +11,11 @@
               ;; Open the PTY
               (open-pty pty)
 
+              ;; Load configuration file
+              (unless (load-config-file)
+                ;; If config loading failed, exit
+                (return-from main nil))
+
               ;; Enable raw mode for curses-like interface
               (enable-raw-mode 0)
 

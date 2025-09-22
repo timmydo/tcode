@@ -84,6 +84,31 @@
   (let ((input nil))
     (or (null input) (string= input "exit"))))
 
+(defun test-config-file-functions ()
+  "Test configuration file functionality"
+  (let ((test-config-dir (merge-pathnames "test-tcode/" (user-homedir-pathname)))
+        (test-config-file (merge-pathnames "test-tcode/config.lisp" (user-homedir-pathname))))
+
+    ;; Clean up any existing test config
+    (when (probe-file test-config-file)
+      (delete-file test-config-file))
+    (when (probe-file test-config-dir)
+      (delete-file test-config-dir))
+
+    ;; Test that template is defined
+    (and (boundp '*config-template*)
+         (stringp *config-template*)
+         (> (length *config-template*) 0))))
+
+(defun test-config-command ()
+  "Test the /config command functionality"
+  (let ((ctx (make-repl-context)))
+    ;; Test /config command
+    (let ((result (submit-command "/config" ctx)))
+      (and (stringp result)
+           (or (search "Created configuration file" result)
+               (search "Configuration file already exists" result))))))
+
 (defun run-all-integration-tests ()
   "Run all integration tests"
   (setf *integration-test-results* '())
@@ -99,6 +124,8 @@
   (run-integration-test "Boolean operations" #'test-boolean-operations)
   (run-integration-test "PTY main integration" #'test-pty-main-integration)
   (run-integration-test "Graceful EOF handling" #'test-graceful-eof-handling)
+  (run-integration-test "Config file functions" #'test-config-file-functions)
+  (run-integration-test "Config command" #'test-config-command)
 
   (let ((passed (count-if (lambda (result) (second result)) *integration-test-results*))
         (total (length *integration-test-results*)))
