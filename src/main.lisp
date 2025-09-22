@@ -114,6 +114,21 @@
                      ((string= escape-sequence "[6~")
                       (setf (repl-context-scroll-offset ctx) (max 0 (- (repl-context-scroll-offset ctx) 3))))
 
+                     ;; Delete key - delete character under cursor
+                     ((string= escape-sequence "[3~")
+                      (when (< (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx)))
+                        (let* ((current-buffer (repl-context-input-buffer ctx))
+                               (cursor-pos (repl-context-cursor-position ctx))
+                               (before (subseq current-buffer 0 cursor-pos))
+                               (after (subseq current-buffer (1+ cursor-pos)))
+                               (new-buffer (concatenate 'string before after)))
+                          (setf (repl-context-input-buffer ctx) new-buffer))
+                        ;; Reset history navigation since user is editing
+                        (setf (repl-context-history-index ctx) 0
+                              (repl-context-original-input ctx) (repl-context-input-buffer ctx)
+                              (repl-context-state ctx) :normal
+                              (repl-context-status-message ctx) "")))
+
                      ;; Home key - move cursor to beginning of line
                      ;; Various terminals send different sequences for Home
                      ((or (string= escape-sequence "[H")
@@ -198,6 +213,41 @@
                           (new-buffer (concatenate 'string before after)))
                      (setf (repl-context-input-buffer ctx) new-buffer
                            (repl-context-cursor-position ctx) (1- cursor-pos)))
+                   ;; Reset history navigation since user is editing
+                   (setf (repl-context-history-index ctx) 0
+                         (repl-context-original-input ctx) (repl-context-input-buffer ctx)
+                         (repl-context-state ctx) :normal
+                         (repl-context-status-message ctx) "")))
+
+                ;; Ctrl+D - delete character under cursor, or exit if buffer is empty
+                ((char= char (code-char 4)) ; Ctrl+D
+                 (if (= (length (repl-context-input-buffer ctx)) 0)
+                     ;; If buffer is empty, exit like in bash
+                     (progn
+                       (clear-screen)
+                       (move-cursor 1 1)
+                       (return))
+                     ;; Otherwise, delete character under cursor
+                     (when (< (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx)))
+                       (let* ((current-buffer (repl-context-input-buffer ctx))
+                              (cursor-pos (repl-context-cursor-position ctx))
+                              (before (subseq current-buffer 0 cursor-pos))
+                              (after (subseq current-buffer (1+ cursor-pos)))
+                              (new-buffer (concatenate 'string before after)))
+                         (setf (repl-context-input-buffer ctx) new-buffer))
+                       ;; Reset history navigation since user is editing
+                       (setf (repl-context-history-index ctx) 0
+                             (repl-context-original-input ctx) (repl-context-input-buffer ctx)
+                             (repl-context-state ctx) :normal
+                             (repl-context-status-message ctx) ""))))
+
+                ;; Ctrl+K - kill line from cursor to end
+                ((char= char (code-char 11)) ; Ctrl+K
+                 (when (< (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx)))
+                   (let* ((current-buffer (repl-context-input-buffer ctx))
+                          (cursor-pos (repl-context-cursor-position ctx))
+                          (new-buffer (subseq current-buffer 0 cursor-pos)))
+                     (setf (repl-context-input-buffer ctx) new-buffer))
                    ;; Reset history navigation since user is editing
                    (setf (repl-context-history-index ctx) 0
                          (repl-context-original-input ctx) (repl-context-input-buffer ctx)
