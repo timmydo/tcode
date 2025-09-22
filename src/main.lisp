@@ -49,7 +49,8 @@
   (content-height 0)
   (scroll-offset 0)
   (status-message "")
-  (ctrl-c-pressed nil))
+  (ctrl-c-pressed nil)
+  (context-directories (list (truename "."))))
 
 (defun repl-loop (pty rows cols)
   "Main REPL loop with fixed prompt at bottom and scrollable history above"
