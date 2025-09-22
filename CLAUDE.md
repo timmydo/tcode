@@ -14,8 +14,8 @@ tcode is a terminal-based CLI for coding
 
 ### Testing
 - When running tests, unless told otherwise, specify the relevant test file. Do not run all the tests. You should not need to start TLE to run the tests.
-- **Run specific test**: `./test.sh test-dom.lisp` - runs only the specified test file
-- **Run specific test (verbose)**: `./test.sh -v test-dom.lisp` - runs specific test with full output
+- **Run specific test**: `./test.sh test-rmdir.lisp` - runs only the specified test file
+- **Run specific test (verbose)**: `./test.sh -v test-rmdir.lisp` - runs specific test with full output
 - **Run all tests**: `./test.sh` - runs all tests (quiet mode, only failures shown). Only do when requested specifically.
 - **Help**: `./test.sh -h` - shows usage information and examples
 - **Test files location**: Tests are located in the `tests/` directory

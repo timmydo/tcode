@@ -50,7 +50,7 @@
   (scroll-offset 0)
   (status-message "")
   (state :normal)  ; :normal, :exit-warning
-  (context-directories (list (truename "."))))
+  (context-directories (list (namestring (truename ".")))))
 
 (defun repl-loop (pty rows cols)
   "Main REPL loop with fixed prompt at bottom and scrollable history above"

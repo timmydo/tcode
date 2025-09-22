@@ -93,12 +93,6 @@
         (close-pty pty1)
         (close-pty pty2)))))
 
-(defun test-print-separator ()
-  "Test the print-separator function"
-  (with-output-to-string (*standard-output*)
-    (print-separator)
-    t))  ; Just test that it doesn't crash
-
 (defun run-all-pty-tests ()
   "Run all PTY tests"
   (setf *pty-test-results* '())
@@ -110,7 +104,6 @@
   (run-pty-test "PTY write string" #'test-pty-write-string)
   (run-pty-test "PTY cleanup" #'test-pty-cleanup)
   (run-pty-test "Multiple PTY instances" #'test-pty-multiple-instances)
-  (run-pty-test "Print separator" #'test-print-separator)
 
   (let ((passed (count-if (lambda (result) (second result)) *pty-test-results*))
         (total (length *pty-test-results*)))

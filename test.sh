@@ -1,11 +1,9 @@
 #!/bin/sh
-# Test script for TLE (Timmy's Lisp Environment)
 
 export CL_SOURCE_REGISTRY="$(pwd)//:"
 
 # Parse command line arguments
 VERBOSE=0
-START_SERVER=0
 SPECIFIC_TEST=""
 
 while [ $# -gt 0 ]; do
@@ -14,34 +12,27 @@ while [ $# -gt 0 ]; do
             VERBOSE=1
             shift
             ;;
-        --start-server)
-            START_SERVER=1
-            shift
-            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS] [TEST_FILE]"
             echo ""
-            echo "Run TLE (Timmy's Lisp Environment) tests"
+            echo "Run TCODE tests"
             echo ""
             echo "OPTIONS:"
             echo "  -v, --verbose      Show all test output (verbose mode)"
-            echo "  --start-server     Start TLE server before running tests"
             echo "  -h, --help         Show this help message"
             echo ""
             echo "ARGUMENTS:"
-            echo "  TEST_FILE          Specific test file to run (e.g., test-dom.lisp)"
+            echo "  TEST_FILE          Specific test file to run (e.g., test-rmdir.lisp)"
             echo "                     If not specified, all tests are run"
             echo ""
             echo "EXAMPLES:"
-            echo "  $0                        # Run all tests (no server, quiet mode)"
-            echo "  $0 -v                     # Run all tests (no server, verbose mode)"
-            echo "  $0 --start-server         # Run all tests with TLE server"
-            echo "  $0 test-dom.lisp          # Run only DOM tests (no server)"
-            echo "  $0 --start-server -v test-dom.lisp   # Run DOM tests with server and verbose output"
+            echo "  $0                        # Run all tests (quiet mode)"
+            echo "  $0 -v                     # Run all tests (verbose mode)"
+            echo "  $0 test-rmdir.lisp        # Run only rmdir tests"
+            echo "  $0 -v test-rmdir.lisp     # Run rmdir tests with verbose output"
             echo ""
             echo "Default mode is quiet - only failures are shown."
             echo "Use --verbose to see all test output including successes."
-            echo "Use --start-server to start TLE server before running tests."
             exit 0
             ;;
         *)
@@ -80,26 +71,10 @@ if [ -n "$SPECIFIC_TEST" ]; then
     fi
 else
     if [ $VERBOSE -eq 1 ]; then
-        echo "Starting TLE tests (verbose mode)..."
+        echo "Starting TCODE tests (verbose mode)..."
     else
-        echo "Starting TLE tests (quiet mode - only failures shown)..."
+        echo "Starting TCODE tests (quiet mode - only failures shown)..."
     fi
-fi
-
-# Start TLE in background if requested
-TLE_PID=""
-if [ $START_SERVER -eq 1 ]; then
-    if [ $VERBOSE -eq 1 ]; then
-        echo "Starting TLE server..."
-    fi
-    ./start.sh &
-    TLE_PID=$!
-
-    # Wait for server to start
-    if [ $VERBOSE -eq 1 ]; then
-        echo "Waiting for server to start..."
-    fi
-    sleep 5
 fi
 
 # Run all tests in tests/ directory
@@ -197,15 +172,6 @@ for test_file in $lisp_test_files; do
         fi
     fi
 done
-
-# Clean up - kill TLE server if it was started
-if [ -n "$TLE_PID" ]; then
-    if [ $VERBOSE -eq 1 ]; then
-        echo "Stopping TLE server..."
-    fi
-    kill $TLE_PID 2>/dev/null
-    wait $TLE_PID 2>/dev/null
-fi
 
 echo "Tests completed."
 echo "Passed: $TESTS_PASSED, Failed: $TESTS_FAILED"

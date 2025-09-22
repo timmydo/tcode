@@ -27,6 +27,18 @@
                         (format nil "Added directory: ~A" dir-path))
                       (format nil "Directory not found or already added: ~A" dir-path))))
 
+               ;; Handle /rmdir command for directory management
+               ((and (> (length input-string) 6)
+                     (string= (subseq input-string 0 6) "/rmdir"))
+                (let ((dir-path (string-trim " " (subseq input-string 6))))
+                  (if (and (> (length dir-path) 0)
+                           (member dir-path (repl-context-context-directories ctx) :test #'string=))
+                      (progn
+                        (setf (repl-context-context-directories ctx)
+                              (remove dir-path (repl-context-context-directories ctx) :test #'string=))
+                        (format nil "Removed directory: ~A" dir-path))
+                      (format nil "Directory not in context: ~A" dir-path))))
+
                ;; Default: evaluate as Lisp expression
                (t (handler-case
                       (let ((expr (read-from-string input-string)))
@@ -48,9 +60,11 @@
           (repl-context-original-input ctx) ""
           (repl-context-state ctx) :normal)
 
-    ;; Only update status with directory list after /add command
-    (when (and (> (length input-string) 4)
-               (string= (subseq input-string 0 4) "/add"))
+    ;; Update status with directory list after /add or /rmdir commands
+    (when (or (and (> (length input-string) 4)
+                   (string= (subseq input-string 0 4) "/add"))
+              (and (> (length input-string) 6)
+                   (string= (subseq input-string 0 6) "/rmdir")))
       (setf (repl-context-status-message ctx)
             (if (> (length (repl-context-context-directories ctx)) 0)
                 (format nil "Dirs: ~{~A~^, ~}" (reverse (repl-context-context-directories ctx)))
