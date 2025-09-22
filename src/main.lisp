@@ -37,10 +37,13 @@
       (disable-raw-mode 0)
       (cleanup-pty pty)))))
 
+(defstruct history-item
+  (command "")
+  (result nil))
+
 (defstruct repl-context
   (input-buffer "")
   (history '())
-  (results '())
   (history-index 0)
   (original-input "")
   (content-height 0)
@@ -60,8 +63,8 @@
     (loop
       (handler-case
           (progn
-            ;; Draw the content area with history and results
-            (draw-content-area (repl-context-content-height ctx) (repl-context-history ctx) (repl-context-results ctx) (repl-context-scroll-offset ctx) cols)
+            ;; Draw the content area with history
+            (draw-content-area (repl-context-content-height ctx) (repl-context-history ctx) (repl-context-scroll-offset ctx) cols)
 
             ;; Update prompt area
             (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-status-message ctx))
@@ -121,7 +124,7 @@
                         (when (= (repl-context-history-index ctx) 0)
                           (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
                         (incf (repl-context-history-index ctx))
-                        (setf (repl-context-input-buffer ctx) (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx))
+                        (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))
                               (repl-context-ctrl-c-pressed ctx) nil
                               (repl-context-status-message ctx) "")))
 
@@ -131,7 +134,7 @@
                         (decf (repl-context-history-index ctx))
                         (if (= (repl-context-history-index ctx) 0)
                             (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
-                            (setf (repl-context-input-buffer ctx) (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx))))
+                            (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
                         (setf (repl-context-ctrl-c-pressed ctx) nil
                               (repl-context-status-message ctx) "")))
 
@@ -151,9 +154,8 @@
 
                    (when (> (length trimmed-input) 0)
                      ;; Add to history and evaluate
-                     (push trimmed-input (repl-context-history ctx))
                      (let ((result (safe-eval-string trimmed-input)))
-                       (push result (repl-context-results ctx)))
+                       (push (make-history-item :command trimmed-input :result result) (repl-context-history ctx)))
                      (setf (repl-context-history-index ctx) 0)
 
                      ;; Auto-scroll to show latest (scroll to bottom)
@@ -178,7 +180,6 @@
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
                  (setf (repl-context-history ctx) '()
-                       (repl-context-results ctx) '()
                        (repl-context-scroll-offset ctx) 0
                        (repl-context-ctrl-c-pressed ctx) nil
                        (repl-context-status-message ctx) ""))
@@ -236,8 +237,8 @@
   (move-cursor (- rows 2) (+ 8 (length input-buffer)))
   (force-output))
 
-(defun draw-content-area (content-height history results scroll-offset cols)
-  "Draw the scrollable content area with history and results"
+(defun draw-content-area (content-height history scroll-offset cols)
+  "Draw the scrollable content area with history items"
   (let ((total-entries (length history))
         (current-row 1)
         (content-width (- cols 2))) ; Reserve 2 columns for scroll bar
@@ -261,7 +262,6 @@
         ;; Display visible history entries and their results
         (loop for i from (1- end-index) downto start-index
               for hist-item = (nth i history)
-              for result-item = (nth i results)
               do
               (when (<= current-row content-height)
                 ;; Display command (truncate if too long for content width)
@@ -269,25 +269,25 @@
                 (set-color 6) ; Cyan
                 (format t "tcode> ")
                 (reset-color)
-                (let ((cmd-text (if (> (length hist-item) (- content-width 7))
+                (let ((cmd-text (if (> (length (history-item-command hist-item)) (- content-width 7))
                                     (concatenate 'string
-                                                 (subseq hist-item 0 (- content-width 10))
+                                                 (subseq (history-item-command hist-item) 0 (- content-width 10))
                                                  "...")
-                                    hist-item)))
+                                    (history-item-command hist-item))))
                   (format t "~A" cmd-text))
                 (incf current-row))
 
-              (when (and result-item (<= current-row content-height))
+              (when (and (history-item-result hist-item) (<= current-row content-height))
                 ;; Display result (truncate if too long for content width)
                 (move-cursor current-row 1)
                 (set-color 3) ; Yellow
                 (format t "=> ")
                 (reset-color)
-                (let ((result-text (if (> (length (format nil "~A" result-item)) (- content-width 3))
+                (let ((result-text (if (> (length (format nil "~A" (history-item-result hist-item))) (- content-width 3))
                                        (concatenate 'string
-                                                    (subseq (format nil "~A" result-item) 0 (- content-width 6))
+                                                    (subseq (format nil "~A" (history-item-result hist-item)) 0 (- content-width 6))
                                                     "...")
-                                       (format nil "~A" result-item))))
+                                       (format nil "~A" (history-item-result hist-item)))))
                   (format t "~A" result-text))
                 (incf current-row))
 

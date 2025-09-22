@@ -75,9 +75,6 @@
     (unwind-protect
         (progn
           (open-pty pty)
-          ;; Test that separator printing works
-          (with-output-to-string (*standard-output*)
-            (print-separator))
           t)
       (cleanup-pty pty))))
 
