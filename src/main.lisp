@@ -49,7 +49,7 @@
   (content-height 0)
   (scroll-offset 0)
   (status-message "")
-  (ctrl-c-pressed nil)
+  (state :normal)  ; :normal, :exit-warning
   (context-directories (list (truename "."))))
 
 (defun repl-loop (pty rows cols)
@@ -75,14 +75,14 @@
               (cond
                 ;; Ctrl+C - handle double press to exit
                 ((char= char (code-char 3))
-                 (if (repl-context-ctrl-c-pressed ctx)
+                 (if (eq (repl-context-state ctx) :exit-warning)
                      (progn
                        ;; Clear screen and reset cursor before exiting
                        (clear-screen)
                        (move-cursor 1 1)
                        (return))  ; Exit on second Ctrl+C
                      (progn
-                       (setf (repl-context-ctrl-c-pressed ctx) t
+                       (setf (repl-context-state ctx) :exit-warning
                              (repl-context-status-message ctx) "Press Ctrl-C again to exit..."))))
 
                 ;; ESC sequence handling
@@ -126,7 +126,7 @@
                           (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
                         (incf (repl-context-history-index ctx))
                         (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))
-                              (repl-context-ctrl-c-pressed ctx) nil
+                              (repl-context-state ctx) :normal
                               (repl-context-status-message ctx) "")))
 
                      ;; Arrow Down key
@@ -136,7 +136,7 @@
                         (if (= (repl-context-history-index ctx) 0)
                             (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
                             (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
-                        (setf (repl-context-ctrl-c-pressed ctx) nil
+                        (setf (repl-context-state ctx) :normal
                               (repl-context-status-message ctx) "")))
 
                      ;; Standalone ESC - exit
@@ -154,19 +154,8 @@
                      (return))
 
                    (when (> (length trimmed-input) 0)
-                     ;; Add to history and evaluate
-                     (let ((result (safe-eval-string trimmed-input)))
-                       (push (make-history-item :command trimmed-input :result result) (repl-context-history ctx)))
-                     (setf (repl-context-history-index ctx) 0)
-
-                     ;; Auto-scroll to show latest (scroll to bottom)
-                     (setf (repl-context-scroll-offset ctx) 0)))
-
-                   ;; Reset input buffer and original input
-                   (setf (repl-context-input-buffer ctx) ""
-                         (repl-context-original-input ctx) ""
-                         (repl-context-ctrl-c-pressed ctx) nil
-                         (repl-context-status-message ctx) ""))
+                     ;; Evaluate and handle all context updates
+                     (submit-command trimmed-input ctx))))
 
                 ;; Backspace - remove character
                 ((or (char= char #\Backspace) (char= char #\Del))
@@ -175,14 +164,14 @@
                    ;; Reset history navigation since user is editing
                    (setf (repl-context-history-index ctx) 0
                          (repl-context-original-input ctx) (repl-context-input-buffer ctx)
-                         (repl-context-ctrl-c-pressed ctx) nil
+                         (repl-context-state ctx) :normal
                          (repl-context-status-message ctx) "")))
 
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
                  (setf (repl-context-history ctx) '()
                        (repl-context-scroll-offset ctx) 0
-                       (repl-context-ctrl-c-pressed ctx) nil
+                       (repl-context-state ctx) :normal
                        (repl-context-status-message ctx) ""))
 
                 ;; Regular characters - add to buffer
@@ -191,7 +180,7 @@
                  ;; Reset history navigation since user is editing
                  (setf (repl-context-history-index ctx) 0
                        (repl-context-original-input ctx) (repl-context-input-buffer ctx)
-                       (repl-context-ctrl-c-pressed ctx) nil
+                       (repl-context-state ctx) :normal
                        (repl-context-status-message ctx) "")))))
 
 
@@ -330,12 +319,3 @@
               (move-cursor row scrollbar-col)
               (format t "~C[97m█~C[0m" #\Escape #\Escape)))))))) ; White thumb
 
-(defun safe-eval-string (input-string)
-  "Safely evaluate a Lisp expression from string"
-  (handler-case
-      (let ((expr (read-from-string input-string)))
-        (eval expr))
-    (error (e)
-      (format nil "Evaluation error: ~A" e))
-    (reader-error (e)
-      (format nil "Parse error: ~A" e))))

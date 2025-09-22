@@ -9,6 +9,7 @@
   :components (
                (:file "tcode-package")
                (:file "pty")
+               (:file "eval")
 	       ;; entry point
                (:file "main")
 ))
