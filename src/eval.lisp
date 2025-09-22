@@ -39,6 +39,12 @@
                         (format nil "Removed directory: ~A" dir-path))
                       (format nil "Directory not in context: ~A" dir-path))))
 
+               ;; Handle /clear command to clear history
+               ((string= (string-trim " " input-string) "/clear")
+                (progn
+                  (setf (repl-context-history ctx) '())
+                  "History cleared"))
+
                ;; Default: evaluate as Lisp expression
                (t (handler-case
                       (let ((expr (read-from-string input-string)))
@@ -50,8 +56,9 @@
            (error (e)
              (format nil "Unhandled exception: ~A" e)))))
 
-    ;; Add to history
-    (push (make-history-item :command input-string :result result) (repl-context-history ctx))
+    ;; Add to history (except for /clear command)
+    (unless (string= (string-trim " " input-string) "/clear")
+      (push (make-history-item :command input-string :result result) (repl-context-history ctx)))
 
     ;; Reset context state
     (setf (repl-context-history-index ctx) 0
@@ -69,5 +76,9 @@
             (if (> (length (repl-context-context-directories ctx)) 0)
                 (format nil "Dirs: ~{~A~^, ~}" (reverse (repl-context-context-directories ctx)))
                 "")))
+
+    ;; Update status after /clear command
+    (when (string= (string-trim " " input-string) "/clear")
+      (setf (repl-context-status-message ctx) "History cleared"))
 
     result))
