@@ -40,19 +40,21 @@
     (unless (probe-file config-dir)
       (ensure-directories-exist config-dir))))
 
-(defun initialize-config-file ()
-  "Initialize the configuration file if it doesn't exist"
+(defun initialize-config-file (&optional force)
+  "Initialize the configuration file if it doesn't exist, or overwrite if force is true"
   (let ((config-file (get-config-file-path)))
-    (if (probe-file config-file)
+    (if (and (probe-file config-file) (not force))
         (format nil "Configuration file already exists at: ~A" config-file)
         (progn
           (ensure-config-directory)
           (with-open-file (stream config-file
                                   :direction :output
-                                  :if-exists :error
+                                  :if-exists :supersede
                                   :if-does-not-exist :create)
             (write-string *config-template* stream))
-          (format nil "Created configuration file at: ~A" config-file)))))
+          (if force
+              (format nil "Overwrote configuration file at: ~A" config-file)
+              (format nil "Created configuration file at: ~A" config-file))))))
 
 (defun load-config-file ()
   "Load the configuration file if it exists, with error handling"

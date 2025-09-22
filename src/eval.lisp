@@ -46,8 +46,10 @@
                   "History cleared"))
 
                ;; Handle /config command to initialize configuration file
-               ((string= (string-trim " " input-string) "/config")
-                (initialize-config-file))
+               ((or (string= (string-trim " " input-string) "/config")
+                    (string= (string-trim " " input-string) "/config -f"))
+                (let ((force (string= (string-trim " " input-string) "/config -f")))
+                  (initialize-config-file force)))
 
                ;; Default: evaluate as Lisp expression
                (t (handler-case
