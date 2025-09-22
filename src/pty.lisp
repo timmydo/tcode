@@ -334,6 +334,8 @@
                (setf timeout-counter 0)
                ;; Check if we have a complete sequence
                (cond
+                 ;; Delete: ESC[3~
+                 ((string= sequence "[3~") (return sequence))
                  ;; Page Up: ESC[5~
                  ((string= sequence "[5~") (return sequence))
                  ;; Page Down: ESC[6~

@@ -115,7 +115,10 @@
                       (setf (repl-context-scroll-offset ctx) (max 0 (- (repl-context-scroll-offset ctx) 3))))
 
                      ;; Delete key - delete character under cursor
-                     ((string= escape-sequence "[3~")
+                     ;; Different terminals send different sequences for Delete
+                     ((or (string= escape-sequence "[3~")   ; Most common Delete key sequence
+                          (string= escape-sequence "[P")    ; Some terminals
+                          (string= escape-sequence "[M"))   ; Alternative sequence
                       (when (< (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx)))
                         (let* ((current-buffer (repl-context-input-buffer ctx))
                                (cursor-pos (repl-context-cursor-position ctx))
