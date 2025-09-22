@@ -252,17 +252,22 @@
   (format t "tcode> ")
   (reset-color)
 
-  ;; Draw input buffer with cursor in the correct position
-  (let ((before-cursor (subseq input-buffer 0 cursor-position))
-        (after-cursor (subseq input-buffer cursor-position)))
-    (format t "~A" before-cursor)
-    ;; White rectangle cursor
-    (format t "~C[47m~A~C[0m" #\Escape
+  ;; Draw input buffer first
+  (format t "~A" input-buffer)
+
+  ;; If cursor is at the end, add a space; otherwise we'll overwrite the character
+  (when (= cursor-position (length input-buffer))
+    (format t " "))
+
+  ;; Position cursor and draw inverted character at cursor position
+  (when (>= cursor-position 0)
+    (move-cursor (- rows 2) (+ 8 cursor-position))
+    ;; Draw inverted character at cursor position (black text on white background)
+    (format t "~C[47;31m~A~C[0m" #\Escape
             (if (< cursor-position (length input-buffer))
                 (char input-buffer cursor-position)
                 #\Space)
-            #\Escape)
-    (format t "~A" after-cursor))
+            #\Escape))
 
   ;; Bottom separator line
   (draw-horizontal-line (- rows 1) cols)
@@ -275,7 +280,7 @@
     (format t "~A" status-message)
     (reset-color))
 
-  ;; Move cursor back to prompt area and position it correctly
+  ;; Position cursor at the cursor location (already done above, but ensure it's there)
   (move-cursor (- rows 2) (+ 8 cursor-position))
   (force-output))
 
