@@ -44,11 +44,17 @@
               (let* ((response-string (if (stringp raw-response)
                                           raw-response
                                           (flexi-streams:octets-to-string raw-response :external-format :utf-8)))
-                     (json-response (jsown:parse response-string))
-                     (choices (jsown:val json-response "choices")))
-                (if (and choices (> (length choices) 0))
-                    (jsown:val (jsown:val (aref choices 0) "message") "content")
-                    "No response from API"))
+                     (json-response (jsown:parse response-string)))
+                (handler-case
+                    (let* ((choices (jsown:val json-response "choices"))
+                           (first-choice (if (vectorp choices) (aref choices 0) (first choices)))
+                           (message (jsown:val first-choice "message"))
+                           (content (jsown:val message "content")))
+                      (if (stringp content)
+                          content
+                          (format nil "~A" content)))
+                  (error (parse-err)
+                    (format nil "JSON parsing failed: ~A~%Raw response: ~A" parse-err response-string))))
             (error (e)
               (format nil "Response parsing error: ~A" e)))))
     (error (e)
