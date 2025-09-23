@@ -21,12 +21,10 @@
 ;; but without any warranty; without even the implied warranty of
 ;; merchantability or fitness for a particular purpose.  See the GNU
 ;; Lesser General Public License for more details.
-;;
-;; $Id$
 
 (defpackage #:puri
   (:use #:cl)
-  #-allegro (:nicknames #:net.uri)
+  #-(or allegro zacl) (:nicknames #:net.uri)
   (:export
    #:uri                                ; the type and a function
    #:uri-p
@@ -36,6 +34,7 @@
    #:uri-host #:uri-port
    #:uri-path
    #:uri-query
+   #:uri-is-ip6
    #:uri-fragment
    #:uri-plist
    #:uri-authority                      ; pseudo-slot accessor
@@ -240,6 +239,10 @@
     :initarg :parsed-path
     :initform nil
     :accessor .uri-parsed-path)
+   (is-ip6
+    :initarg :is-ip6
+    :initform nil
+    :accessor uri-is-ip6)
    (hashcode
     ;; cached sxhash, so we don't have to compute it more than once.
     :initarg :hashcode :initform nil :accessor uri-hashcode)))
@@ -364,7 +367,7 @@
       #\Rubout ;; (code-char #x7f)
       ;; `unwise':
       #\{ #\} #\| #\\ #\^ #\[ #\] #\`))
-  "Excluded charcters from RFC2369 (http://www.ietf.org/rfc/rfc2396.txt 2.4.3)")
+  "Excluded charcters from RFC2396 (http://www.ietf.org/rfc/rfc2396.txt 2.4.3)")
 
 (defun reserved-char-vector (chars &key except)
   (do* ((a (make-array 128 :element-type 'bit :initial-element 0))
@@ -423,19 +426,27 @@
      (append *excluded-characters* '(#\& #\~ #\/ #\?))))
 
 (defparameter *illegal-characters*
-    (reserved-char-vector (remove #\# *excluded-characters*)))
+    (reserved-char-vector (set-difference *excluded-characters*
+                                          '(#\# #\[ #\]))))
 (defparameter *strict-illegal-query-characters*
     (reserved-char-vector (append '(#\?) (remove #\# *excluded-characters*))))
 (defparameter *illegal-query-characters*
     (reserved-char-vector
      *excluded-characters* :except '(#\^ #\| #\#)))
 
+(defparameter *valid-ip6-characters*
+  (reserved-char-vector
+     '#.(nconc (gen-char-range-list #\a #\f)
+               (gen-char-range-list #\A #\F)
+               (gen-char-range-list #\0 #\9)
+               '(#\: #\]))))
+
 
 (defun parse-uri (thing &key (class 'uri) &aux escape)
   (when (uri-p thing) (return-from parse-uri thing))
 
   (setq escape (escape-p thing))
-  (multiple-value-bind (scheme host port path query fragment)
+  (multiple-value-bind (scheme host port path query fragment is-ip6)
       (parse-uri-string thing)
     (when scheme
       (setq scheme
@@ -483,6 +494,7 @@
             (make-instance 'uri
               :scheme scheme
               :host host
+              :is-ip6 is-ip6
               :port port
               :path path
               :query query
@@ -492,6 +504,7 @@
             (make-instance class
               :scheme scheme
               :host host
+              :is-ip6 is-ip6
               :port port
               :path path
               :query query
@@ -516,6 +529,7 @@
   ;; simulating:
   ;;  ^(([^:/?#]+):)?
   ;;   (//([^/?#]*))?
+  ;;       May include a []-pair for ipv6
   ;;   ([^?#]*)
   ;;   (\?([^#]*))?
   ;;   (#(.*))?
@@ -525,6 +539,7 @@
          (tokval nil)
          (scheme nil)
          (host nil)
+         (is-ip6 nil)
          (port nil)
          (path-components '())
          (query nil)
@@ -564,10 +579,14 @@ URI ~s contains illegal character ~s at position ~d."
                                       (#\? (return :question))
                                       (#\# (return :hash))))
                              (:query (case c (#\# (return :hash))))
+                             (:ip6 (case c
+                                     (#\] (return :close-bracket))))
                              (:rest)
                              (t (case c
                                   (#\: (return :colon))
                                   (#\? (return :question))
+                                  (#\[ (return :open-bracket))
+                                  (#\] (return :close-bracket))
                                   (#\# (return :hash))
                                   (#\/ (return :slash)))))
                            (incf start)))
@@ -645,11 +664,20 @@ URI ~s contains illegal character ~s at position ~d."
                       (setq state 6))
              (:end (push "/" path-components)
                    (setq state 9))))
+          (66 ;; seen [<scheme>:]//[
+           (ecase (read-token :ip6 *valid-ip6-characters*)
+             (:string (setq host tokval)
+                      (setq is-ip6 t)
+                      (setq state 67))))
+          (67 ;; seen [<scheme>:]//[ip6]
+           (ecase (read-token t)
+             (:close-bracket (setq state 11))))
           (4 ;; seen [<scheme>:]//
            (ecase (read-token t)
              (:colon (failure))
              (:question (failure))
              (:hash (failure))
+             (:open-bracket (setq state 66))
              (:slash
               (if* (and (equalp "file" scheme)
                         (null host))
@@ -727,7 +755,7 @@ URI ~s contains illegal character ~s at position ~d."
              (values
               scheme host port
               (apply #'concatenate 'string (nreverse path-components))
-              query fragment)))
+              query fragment is-ip6)))
           ;; URN parsing:
           (15 ;; seen urn:, read nid now
            (case (read-token :colon *valid-nid-characters*)
@@ -831,6 +859,7 @@ URI ~s contains illegal character ~s at position ~d."
     (setf (uri-string uri)
       (let ((scheme (uri-scheme uri))
             (host (uri-host uri))
+            (is-ip6 (uri-is-ip6 uri))
             (port (uri-port uri))
             (path (uri-path uri))
             (query (uri-query uri))
@@ -843,9 +872,11 @@ URI ~s contains illegal character ~s at position ~d."
              *reserved-characters* escape))
           (when scheme ":")
           (when (or host (eq :file scheme)) "//")
+          (when is-ip6 "[")
           (when host
             (encode-escaped-encoding
              host *reserved-authority-characters* escape))
+          (when is-ip6 "]")
           (when port ":")
           (when port
             #-allegro (format nil "~D" port)

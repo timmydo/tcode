@@ -23,8 +23,8 @@
 ;; $Id$
 
 
-(defpackage #:puri-tests (:use #:puri #:cl #:ptester))
-(in-package #:puri-tests)
+(defpackage #:puri/test (:use #:puri #:cl #:ptester))
+(in-package #:puri/test)
 
 (unintern-uri t)
 
@@ -427,5 +427,3 @@
     (with-tests (:name "puri")
       (gen-test-forms)))
   t)
-
-
