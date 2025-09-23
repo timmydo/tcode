@@ -2,6 +2,11 @@
 
 export CL_SOURCE_REGISTRY="$(pwd)//:"
 
+# Configure OpenSSL paths for Guix systems
+if [ -d "/gnu/store" ]; then
+    OPENSSL_PATH=$(guix build --no-grafts openssl | grep -v -- '-doc' | grep -v -- '-static' | head -1)
+fi
+
 # Parse command line arguments
 VERBOSE=0
 SPECIFIC_TEST=""
@@ -138,12 +143,25 @@ for test_file in $lisp_test_files; do
         if [ -n "$test_function" ]; then
             if [ $VERBOSE -eq 1 ]; then
                 echo "Running Lisp tests from $test_file..."
-                if sbcl --noinform --no-userinit --no-sysinit --non-interactive \
-                        --eval "(require \"asdf\")" \
-                        --eval "(sb-int:set-floating-point-modes :traps nil)" \
-                        --eval "(asdf:load-system :tcode)" \
-                        --eval "(load \"$test_file\")" \
-                        --eval "(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))"; then
+                if [ -d "/gnu/store" ]; then
+                    sbcl_cmd="sbcl --noinform --no-userinit --no-sysinit --non-interactive \
+                        --eval \"(require \\\"asdf\\\")\" \
+                        --eval \"(asdf:load-system :cl+ssl/config)\" \
+                        --eval \"(cl+ssl/config:define-libssl-path \\\"$OPENSSL_PATH/lib/libssl.so\\\")\" \
+                        --eval \"(cl+ssl/config:define-libcrypto-path \\\"$OPENSSL_PATH/lib/libcrypto.so\\\")\" \
+                        --eval \"(sb-int:set-floating-point-modes :traps nil)\" \
+                        --eval \"(asdf:load-system :tcode)\" \
+                        --eval \"(load \\\"$test_file\\\")\" \
+                        --eval \"(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))\""
+                else
+                    sbcl_cmd="sbcl --noinform --no-userinit --no-sysinit --non-interactive \
+                        --eval \"(require \\\"asdf\\\")\" \
+                        --eval \"(sb-int:set-floating-point-modes :traps nil)\" \
+                        --eval \"(asdf:load-system :tcode)\" \
+                        --eval \"(load \\\"$test_file\\\")\" \
+                        --eval \"(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))\""
+                fi
+                if eval "$sbcl_cmd"; then
                     TESTS_PASSED=$((TESTS_PASSED + 1))
                     echo "✓ Lisp tests in $test_file passed"
                 else
@@ -153,12 +171,25 @@ for test_file in $lisp_test_files; do
                 echo ""
             else
                 # Quiet mode - capture output and only show on failure
-                if output=$(sbcl --noinform --no-userinit --no-sysinit --non-interactive \
-                        --eval "(require \"asdf\")" \
-                        --eval "(sb-int:set-floating-point-modes :traps nil)" \
-                        --eval "(asdf:load-system :tcode)" \
-                        --eval "(load \"$test_file\")" \
-                        --eval "(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))" 2>&1); then
+                if [ -d "/gnu/store" ]; then
+                    sbcl_cmd="sbcl --noinform --no-userinit --no-sysinit --non-interactive \
+                        --eval \"(require \\\"asdf\\\")\" \
+                        --eval \"(asdf:load-system :cl+ssl/config)\" \
+                        --eval \"(cl+ssl/config:define-libssl-path \\\"$OPENSSL_PATH/lib/libssl.so\\\")\" \
+                        --eval \"(cl+ssl/config:define-libcrypto-path \\\"$OPENSSL_PATH/lib/libcrypto.so\\\")\" \
+                        --eval \"(sb-int:set-floating-point-modes :traps nil)\" \
+                        --eval \"(asdf:load-system :tcode)\" \
+                        --eval \"(load \\\"$test_file\\\")\" \
+                        --eval \"(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))\""
+                else
+                    sbcl_cmd="sbcl --noinform --no-userinit --no-sysinit --non-interactive \
+                        --eval \"(require \\\"asdf\\\")\" \
+                        --eval \"(sb-int:set-floating-point-modes :traps nil)\" \
+                        --eval \"(asdf:load-system :tcode)\" \
+                        --eval \"(load \\\"$test_file\\\")\" \
+                        --eval \"(if (tcode::$test_function) (sb-ext:exit :code 0) (sb-ext:exit :code 1))\""
+                fi
+                if output=$(eval "$sbcl_cmd" 2>&1); then
                     TESTS_PASSED=$((TESTS_PASSED + 1))
                 else
                     TESTS_FAILED=$((TESTS_FAILED + 1))

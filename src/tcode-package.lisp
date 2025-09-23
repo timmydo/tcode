@@ -7,4 +7,5 @@
   (:export #:main
            #:backend-connection
            #:openrouter-connection
-           #:make-openrouter-connection))
+           #:make-openrouter-connection
+           #:dispatch-command))

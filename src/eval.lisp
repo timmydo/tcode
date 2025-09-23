@@ -51,14 +51,18 @@
                 (let ((force (string= (string-trim " " input-string) "/config -f")))
                   (initialize-config-file force)))
 
-               ;; Default: evaluate as Lisp expression
-               (t (handler-case
-                      (let ((expr (read-from-string input-string)))
-                        (eval expr))
-                    (error (e)
-                      (format nil "Evaluation error: ~A" e))
-                    (reader-error (e)
-                      (format nil "Parse error: ~A" e)))))
+               ;; Default: try backend first, then evaluate as Lisp expression
+               (t (if (and (boundp '*tcode-backend*) *tcode-backend*)
+                      ;; Dispatch to backend
+                      (dispatch-command *tcode-backend* input-string ctx)
+                      ;; Fallback to Lisp evaluation
+                      (handler-case
+                          (let ((expr (read-from-string input-string)))
+                            (eval expr))
+                        (error (e)
+                          (format nil "Evaluation error: ~A" e))
+                        (reader-error (e)
+                          (format nil "Parse error: ~A" e))))))
            (error (e)
              (format nil "Unhandled exception: ~A" e)))))
 
