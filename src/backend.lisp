@@ -31,40 +31,25 @@
                          ("messages" (vector (jsown:new-js
                                                ("role" "user")
                                                ("content" input-string))))
-                         ("stream" t))))
-             (response-stream nil)
+)))
              (accumulated-response ""))
 
-        (setf response-stream
-              (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
-                                   :method :post
-                                   :content payload
-                                   :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
-                                                        ("Content-Type" . "application/json"))
-                                   :stream t
-                                   :want-stream t))
-
-        (when response-stream
-          (unwind-protect
-              (loop for line = (read-line response-stream nil nil)
-                    while line
-                    do (when (and (> (length line) 6)
-                                  (string= (subseq line 0 6) "data: "))
-                         (let ((data-part (subseq line 6)))
-                           (unless (string= data-part "[DONE]")
-                             (handler-case
-                                 (let* ((json-data (jsown:parse data-part))
-                                        (choices (jsown:val json-data "choices"))
-                                        (first-choice (and (> (length choices) 0) (aref choices 0)))
-                                        (delta (and first-choice (jsown:val first-choice "delta")))
-                                        (content (and delta (jsown:val delta "content"))))
-                                   (when content
-                                     (setf accumulated-response (concatenate 'string accumulated-response content))))
-                               (error (e)
-                                 (declare (ignore e))))))))
-            (when response-stream
-              (close response-stream))))
-
-        accumulated-response)
+        (let ((raw-response (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
+                                                :method :post
+                                                :content payload
+                                                :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
+                                                                     ("Content-Type" . "application/json")))))
+          ;; Convert byte array to string and parse JSON response
+          (handler-case
+              (let* ((response-string (if (stringp raw-response)
+                                          raw-response
+                                          (flexi-streams:octets-to-string raw-response :external-format :utf-8)))
+                     (json-response (jsown:parse response-string))
+                     (choices (jsown:val json-response "choices")))
+                (if (and choices (> (length choices) 0))
+                    (jsown:val (jsown:val (aref choices 0) "message") "content")
+                    "No response from API"))
+            (error (e)
+              (format nil "Response parsing error: ~A" e)))))
     (error (e)
       (format nil "Backend error: ~A" e))))
