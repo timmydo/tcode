@@ -6,6 +6,9 @@
 (defvar *log-file-path* nil
   "Path to the current log file")
 
+(defvar *logging-disabled* nil
+  "Cached value of whether logging is disabled via environment variable")
+
 (defun get-logs-directory ()
   "Get the tcode logs directory path"
   (merge-pathnames "logs/" (get-config-directory)))
@@ -25,15 +28,17 @@
 
 (defun initialize-logging ()
   "Initialize logging system - creates logs directory and opens log file"
-  (ensure-logs-directory)
-  (let ((log-filename (generate-log-filename)))
-    (setf *log-file-path* (merge-pathnames log-filename (get-logs-directory)))
-    (setf *log-stream* (open *log-file-path*
-                             :direction :output
-                             :if-exists :append
-                             :if-does-not-exist :create))
-    (when *log-stream*
-      (log-info "Logging initialized - tcode session started"))))
+  (setf *logging-disabled* (string= (or (sb-ext:posix-getenv "TCODE_NO_LOGS") "") "1"))
+  (unless *logging-disabled*
+    (ensure-logs-directory)
+    (let ((log-filename (generate-log-filename)))
+      (setf *log-file-path* (merge-pathnames log-filename (get-logs-directory)))
+      (setf *log-stream* (open *log-file-path*
+                               :direction :output
+                               :if-exists :append
+                               :if-does-not-exist :create))
+      (when *log-stream*
+        (log-info "Logging initialized - tcode session started")))))
 
 (defun cleanup-logging ()
   "Close the log file stream"
@@ -53,7 +58,7 @@
 
 (defun write-log-entry (level message)
   "Write a log entry with timestamp and level"
-  (when *log-stream*
+  (when (and *log-stream* (not *logging-disabled*))
     (format *log-stream* "[~A] ~A: ~A~%"
             (format-log-timestamp)
             level
