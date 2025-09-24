@@ -17,4 +17,8 @@
            #:log-warn
            #:log-error
            #:log-command
-           #:log-result))
+           #:log-result
+           #:make-lock-with-logging
+           #:make-thread-with-logging
+           #:join-thread-with-logging
+           #:thread-name))

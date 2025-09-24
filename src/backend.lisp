@@ -31,7 +31,7 @@
         (repl-context-status-message repl-context) "Waiting for response...")
 
   ;; Create background thread for HTTP request
-  (let ((thread (bt:make-thread
+  (let ((thread (make-thread-with-logging
                   (lambda ()
                     (handler-case
                         (let* ((api-key (openrouter-api-key backend))

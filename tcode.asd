@@ -12,6 +12,7 @@
                (:file "pty")
                (:file "config")
                (:file "logs")
+               (:file "locks")
                (:file "eval")
 	       ;; entry point
                (:file "main")
