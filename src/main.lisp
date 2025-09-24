@@ -1,8 +1,14 @@
 (in-package :tcode)
 (declaim (optimize (debug 3) (safety 3)))
 
-(defun main ()
-  "Main entry point for tcode - creates a PTY-based terminal with curses-like interface"
+(defun main (&optional test-mode)
+  "Main entry point for tcode - creates a PTY-based terminal with curses-like interface.
+   If test-mode is true, exits immediately without PTY operations for compile checking."
+  ;; Early exit for test mode to allow compilation checking without PTY operations
+  (when test-mode
+    (format t "Test mode: Compilation successful, exiting without PTY operations.~%")
+    (return-from main t))
+
   (multiple-value-bind (rows cols) (get-terminal-size)
     (let ((pty (make-pty :width cols :height rows)))
     (unwind-protect

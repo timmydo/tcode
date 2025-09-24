@@ -11,6 +11,7 @@ tcode is a terminal-based CLI for coding
 ### Building and Running
 - **IMPORTANT**: Do NOT run `./start.sh` as it takes over the Claude Code PTY and cannot be killed easily
 - **Entry point**: `src/main.lisp` contains the main function
+- **Test mode**: `./compile.sh` - compiles and loads the system without starting PTY operations, allowing you to see any SBCL compilation messages. Useful for checking compilation errors.
 - start.sh/test.sh shows how to load the crypto libraries properly. You can't run lisp files individually.
 
 ### Testing
