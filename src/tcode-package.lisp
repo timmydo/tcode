@@ -9,4 +9,12 @@
            #:backend-connection
            #:openrouter-connection
            #:make-openrouter-connection
-           #:dispatch-command))
+           #:dispatch-command
+           #:initialize-logging
+           #:cleanup-logging
+           #:log-debug
+           #:log-info
+           #:log-warn
+           #:log-error
+           #:log-command
+           #:log-result))

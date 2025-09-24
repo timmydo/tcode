@@ -8,12 +8,17 @@
     (unwind-protect
         (handler-case
             (progn
+              ;; Initialize logging system
+              (initialize-logging)
+
               ;; Open the PTY
               (open-pty pty)
 
               ;; Load configuration file
               (unless (load-config-file)
                 ;; If config loading failed, exit
+                (log-error "Failed to load configuration file")
+                (cleanup-logging)
                 (return-from main nil))
 
               ;; Enable raw mode for curses-like interface
@@ -33,6 +38,7 @@
 
 
           (error (e)
+            (log-error "Error in main: ~A" e)
             (move-cursor (- rows 4) 1)
             (set-color 1) ; Red
             (format t "Error in main: ~A" e)
@@ -40,7 +46,8 @@
 
       ;; Always cleanup, even on errors
       (disable-raw-mode 0)
-      (cleanup-pty pty)))))
+      (cleanup-pty pty)
+      (cleanup-logging)))))
 
 (defstruct history-item
   (command "")

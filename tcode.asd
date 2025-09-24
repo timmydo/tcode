@@ -11,6 +11,7 @@
                (:file "backend")
                (:file "pty")
                (:file "config")
+               (:file "logs")
                (:file "eval")
 	       ;; entry point
                (:file "main")

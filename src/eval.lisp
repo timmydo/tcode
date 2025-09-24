@@ -12,6 +12,7 @@
 
 (defun submit-command (input-string ctx)
   "Process user command - handle special commands or evaluate Lisp expressions"
+  (log-command input-string)
   (let ((result
          (handler-case
              (cond
@@ -52,20 +53,18 @@
                 (let ((force (string= (string-trim " " input-string) "/config -f")))
                   (initialize-config-file force)))
 
-               ;; Default: try backend first, then evaluate as Lisp expression
+               ;; Default: dispatch to backend only
                (t (if (and (boundp '*tcode-backend*) *tcode-backend*)
                       ;; Dispatch to backend
                       (dispatch-command *tcode-backend* input-string ctx)
-                      ;; Fallback to Lisp evaluation
-                      (handler-case
-                          (let ((expr (read-from-string input-string)))
-                            (eval expr))
-                        (error (e)
-                          (format nil "Evaluation error: ~A" e))
-                        (reader-error (e)
-                          (format nil "Parse error: ~A" e))))))
+                      ;; No backend available
+                      "No backend configured. Use /config to set up a backend.")))
            (error (e)
+             (log-error "Command evaluation error: ~A" e)
              (format nil "Unhandled exception: ~A" e)))))
+
+    ;; Log the result
+    (log-result result)
 
     ;; Add to history (except for /clear command) - thread-safe
     (unless (string= (string-trim " " input-string) "/clear")
