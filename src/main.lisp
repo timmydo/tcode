@@ -318,13 +318,16 @@
                          (repl-context-state ctx) :normal
                          (repl-context-status-message ctx) "")))
 
-                ;; Ctrl+L to clear content area only
+                ;; Ctrl+L to clear and repaint screen
                 ((char= char (code-char 12)) ; Ctrl+L
                  (bt:with-lock-held ((repl-context-mutex ctx))
                    (setf (repl-context-history ctx) '()))
                  (setf (repl-context-scroll-offset ctx) 0
                        (repl-context-state ctx) :normal
-                       (repl-context-status-message ctx) ""))
+                       (repl-context-status-message ctx) "")
+                 ;; Clear screen and repaint display
+                 (clear-screen)
+                 (repaint-display ctx rows cols))
 
                 ;; Regular characters - insert at cursor position
                 ((and (graphic-char-p char) (< (length (repl-context-input-buffer ctx)) 200))
