@@ -71,14 +71,26 @@
   (state :normal)  ; :normal, :exit-warning, :waiting-for-command
   (context-directories (list (namestring (truename "."))))
   (current-thread nil)  ; Active background thread for HTTP requests
-  (history-mutex nil)   ; Mutex for thread-safe history updates
-  (current-stream nil)) ; Stream to close for cancellation
+  (mutex nil)   ; Mutex for thread-safe context updates
+  (current-stream nil) ; Stream to close for cancellation
+  (repaint-callback nil)) ; Callback to trigger display repaint
+
+(defun repaint-display (ctx rows cols)
+  "Repaint the display with current context state"
+  (let ((history-copy (bt:with-lock-held ((repl-context-mutex ctx))
+                        (copy-list (repl-context-history ctx)))))
+    (draw-content-area (repl-context-content-height ctx) history-copy (repl-context-scroll-offset ctx) cols))
+  (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-cursor-position ctx) (repl-context-status-message ctx)))
 
 (defun repl-loop (pty rows cols)
   "Main REPL loop with fixed prompt at bottom and scrollable history above"
   (declare (ignore pty))  ; PTY not used in current implementation
   (let ((ctx (make-repl-context :content-height (- rows 4)
-                                :history-mutex (make-lock-with-logging "history-mutex"))))
+                                :mutex (make-lock-with-logging "repl-context-mutex"))))
+
+    ;; Set up repaint callback
+    (setf (repl-context-repaint-callback ctx)
+          (lambda () (repaint-display ctx rows cols)))
 
     ;; Initial screen setup
     (clear-screen)
@@ -88,7 +100,7 @@
       (handler-case
           (progn
             ;; Draw the content area with history (thread-safe copy)
-            (let ((history-copy (bt:with-lock-held ((repl-context-history-mutex ctx))
+            (let ((history-copy (bt:with-lock-held ((repl-context-mutex ctx))
                                   (copy-list (repl-context-history ctx)))))
               (draw-content-area (repl-context-content-height ctx) history-copy (repl-context-scroll-offset ctx) cols))
 
@@ -128,7 +140,7 @@
                    (cond
                      ;; Page Up key - scroll up to see older entries
                      ((string= escape-sequence "[5~")
-                      (let* ((total-entries (bt:with-lock-held ((repl-context-history-mutex ctx))
+                      (let* ((total-entries (bt:with-lock-held ((repl-context-mutex ctx))
                                               (length (repl-context-history ctx))))
                              (entries-that-fit (floor (repl-context-content-height ctx) 3))
                              (max-scroll (max 0 (- total-entries entries-that-fit))))
@@ -177,14 +189,14 @@
 
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
-                      (let ((history-length (bt:with-lock-held ((repl-context-history-mutex ctx))
+                      (let ((history-length (bt:with-lock-held ((repl-context-mutex ctx))
                                               (length (repl-context-history ctx)))))
                         (when (and (> history-length 0) (< (repl-context-history-index ctx) history-length))
                           ;; Save original input when first navigating into history
                           (when (= (repl-context-history-index ctx) 0)
                             (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
                           (incf (repl-context-history-index ctx))
-                          (let ((history-item (bt:with-lock-held ((repl-context-history-mutex ctx))
+                          (let ((history-item (bt:with-lock-held ((repl-context-mutex ctx))
                                                 (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
                             (setf (repl-context-input-buffer ctx) (history-item-command history-item)
                                   (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
@@ -193,13 +205,13 @@
 
                      ;; Arrow Down key
                      ((string= escape-sequence "[B")
-                      (let ((history-length (bt:with-lock-held ((repl-context-history-mutex ctx))
+                      (let ((history-length (bt:with-lock-held ((repl-context-mutex ctx))
                                               (length (repl-context-history ctx)))))
                         (when (and (> history-length 0) (> (repl-context-history-index ctx) 0))
                           (decf (repl-context-history-index ctx))
                           (if (= (repl-context-history-index ctx) 0)
                               (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
-                              (let ((history-item (bt:with-lock-held ((repl-context-history-mutex ctx))
+                              (let ((history-item (bt:with-lock-held ((repl-context-mutex ctx))
                                                     (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
                                 (setf (repl-context-input-buffer ctx) (history-item-command history-item))))
                           (setf (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
@@ -308,7 +320,7 @@
 
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
-                 (bt:with-lock-held ((repl-context-history-mutex ctx))
+                 (bt:with-lock-held ((repl-context-mutex ctx))
                    (setf (repl-context-history ctx) '()))
                  (setf (repl-context-scroll-offset ctx) 0
                        (repl-context-state ctx) :normal

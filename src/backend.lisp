@@ -22,13 +22,18 @@
   (make-instance 'openrouter-connection :api-key api-key))
 
 (defgeneric dispatch-command (backend input-string repl-context)
-  (:documentation "Dispatch a command to the backend and stream the response"))
+  (:documentation "Dispatch a command to the backend, create history item, and stream the response"))
 
 (defmethod dispatch-command ((backend openrouter-connection) input-string repl-context)
   "Dispatch command to OpenRouter API with streaming response in background thread"
-  ;; Set state to waiting
-  (setf (repl-context-state repl-context) :waiting-for-command
-        (repl-context-status-message repl-context) "Waiting for response...")
+  ;; Create history item first
+  (let ((initial-result "Processing request in background..."))
+    (bt:with-lock-held ((repl-context-mutex repl-context))
+      (push (make-history-item :command input-string :result initial-result) (repl-context-history repl-context)))
+
+    ;; Set state to waiting
+    (setf (repl-context-state repl-context) :waiting-for-command
+          (repl-context-status-message repl-context) "Waiting for response...")
 
   ;; Create background thread for HTTP request
   (let ((thread (make-thread-with-logging
@@ -83,10 +88,13 @@
                                                         (when content
                                                           (setf accumulated-response (concatenate 'string accumulated-response content))
                                                           ;; Thread-safe update to history
-                                                          (bt:with-lock-held ((repl-context-history-mutex repl-context))
+                                                          (bt:with-lock-held ((repl-context-mutex repl-context))
                                                             (when (repl-context-history repl-context)
                                                               (setf (history-item-result (first (repl-context-history repl-context)))
-                                                                    accumulated-response)))))
+                                                                    accumulated-response)))
+                                                          ;; Trigger display repaint when new content comes in
+                                                          (when (repl-context-repaint-callback repl-context)
+                                                            (funcall (repl-context-repaint-callback repl-context)))))
 
                                                     (error (parse-err)
                                                       ;; Continue processing even if one chunk fails
@@ -94,7 +102,7 @@
                                                       nil)))))))
                               (error (e)
                                 (ignore-errors (close stream))
-                                (bt:with-lock-held ((repl-context-history-mutex repl-context))
+                                (bt:with-lock-held ((repl-context-mutex repl-context))
                                   (when (repl-context-history repl-context)
                                     (setf (history-item-result (first (repl-context-history repl-context)))
                                           (format nil "Stream processing error: ~A" e))))))
@@ -102,12 +110,12 @@
                             (ignore-errors (close stream))
 
                             ;; Final result update
-                            (bt:with-lock-held ((repl-context-history-mutex repl-context))
+                            (bt:with-lock-held ((repl-context-mutex repl-context))
                               (when (repl-context-history repl-context)
                                 (setf (history-item-result (first (repl-context-history repl-context)))
                                       accumulated-response)))))
                       (error (e)
-                        (bt:with-lock-held ((repl-context-history-mutex repl-context))
+                        (bt:with-lock-held ((repl-context-mutex repl-context))
                           (when (repl-context-history repl-context)
                             (setf (history-item-result (first (repl-context-history repl-context)))
                                   (format nil "Backend error: ~A" e))))))
@@ -123,4 +131,4 @@
     (setf (repl-context-current-thread repl-context) thread)
 
     ;; Return immediately with placeholder
-    "Processing request in background..."))
+    initial-result)))

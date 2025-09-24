@@ -9,7 +9,7 @@
 
 (defun test-rmdir-command ()
   "Test the /rmdir command functionality"
-  (let ((ctx (make-repl-context)))
+  (let ((ctx (make-repl-context :mutex (bt:make-lock))))
     ;; Initialize with current directory
     (setf (repl-context-context-directories ctx) (list "/tmp" "/home" "."))
 

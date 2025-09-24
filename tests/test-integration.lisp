@@ -102,7 +102,7 @@
 
 (defun test-config-command ()
   "Test the /config command functionality"
-  (let ((ctx (make-repl-context)))
+  (let ((ctx (make-repl-context :mutex (bt:make-lock))))
     ;; Test /config command
     (let ((result (submit-command "/config" ctx)))
       (and (stringp result)
