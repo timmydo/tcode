@@ -389,16 +389,14 @@
                 ;; Display result with word wrapping
                 (move-cursor current-row 1)
                 (set-color 3) ; Yellow
-                (format t "=> ")
                 (reset-color)
-                (let ((result-lines (wrap-text (format nil "~A" (history-item-result hist-item)) (- content-width 3))))
+                (let ((result-lines (wrap-text (format nil "~A" (history-item-result hist-item)) content-width)))
                   (loop for line in result-lines
                         for first-line = t then nil
                         do
                         (when (<= current-row content-height)
                           (when (not first-line)
-                            (move-cursor current-row 1)
-                            (format t "   ")) ; 3 spaces to align continuation lines
+                            (move-cursor current-row 1))
                           (format t "~A" line)
                           (incf current-row)))))
 
