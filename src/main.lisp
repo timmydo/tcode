@@ -374,27 +374,33 @@
                 (set-color 6) ; Cyan
                 (format t "tcode> ")
                 (reset-color)
-                (let ((cmd-text (if (> (length (history-item-command hist-item)) (- content-width 7))
-                                    (concatenate 'string
-                                                 (subseq (history-item-command hist-item) 0 (- content-width 10))
-                                                 "...")
-                                    (history-item-command hist-item))))
-                  (format t "~A" cmd-text))
-                (incf current-row))
+                (let ((cmd-lines (wrap-text (history-item-command hist-item) (- content-width 7))))
+                  (loop for line in cmd-lines
+                        for first-line = t then nil
+                        do
+                        (when (<= current-row content-height)
+                          (when (not first-line)
+                            (move-cursor current-row 1)
+                            (format t "       ")) ; 7 spaces to align continuation lines
+                          (format t "~A" line)
+                          (incf current-row)))))
 
               (when (and (history-item-result hist-item) (<= current-row content-height))
-                ;; Display result (truncate if too long for content width)
+                ;; Display result with word wrapping
                 (move-cursor current-row 1)
                 (set-color 3) ; Yellow
                 (format t "=> ")
                 (reset-color)
-                (let ((result-text (if (> (length (format nil "~A" (history-item-result hist-item))) (- content-width 3))
-                                       (concatenate 'string
-                                                    (subseq (format nil "~A" (history-item-result hist-item)) 0 (- content-width 6))
-                                                    "...")
-                                       (format nil "~A" (history-item-result hist-item)))))
-                  (format t "~A" result-text))
-                (incf current-row))
+                (let ((result-lines (wrap-text (format nil "~A" (history-item-result hist-item)) (- content-width 3))))
+                  (loop for line in result-lines
+                        for first-line = t then nil
+                        do
+                        (when (<= current-row content-height)
+                          (when (not first-line)
+                            (move-cursor current-row 1)
+                            (format t "   ")) ; 3 spaces to align continuation lines
+                          (format t "~A" line)
+                          (incf current-row)))))
 
               ;; Add blank line between entries if space allows
               (when (<= current-row content-height)
@@ -404,6 +410,67 @@
     (draw-scroll-bar content-height total-entries scroll-offset cols)
 
     (force-output)))
+
+(defun wrap-text (text max-width)
+  "Break text into lines that fit within max-width, preferring word boundaries"
+  (when (or (null text) (zerop (length text)))
+    (return-from wrap-text '("")))
+
+  (let ((lines '())
+        (current-line "")
+        (words (split-string text #\Space)))
+
+    (dolist (word words)
+      (let ((potential-line (if (zerop (length current-line))
+                                word
+                                (concatenate 'string current-line " " word))))
+        (if (<= (length potential-line) max-width)
+            (setf current-line potential-line)
+            (progn
+              ;; Current line is full, start new line
+              (when (> (length current-line) 0)
+                (push current-line lines))
+              ;; If word itself is too long, break it forcefully
+              (if (> (length word) max-width)
+                  (progn
+                    ;; Break long word across multiple lines
+                    (loop with remaining = word
+                          while (> (length remaining) 0)
+                          do (let ((chunk (subseq remaining 0 (min max-width (length remaining)))))
+                               (push chunk lines)
+                               (setf remaining (subseq remaining (length chunk)))))
+                    (setf current-line ""))
+                  (setf current-line word))))))
+
+    ;; Add final line if not empty
+    (when (> (length current-line) 0)
+      (push current-line lines))
+
+    ;; Return lines in correct order
+    (nreverse lines)))
+
+(defun split-string (string separator)
+  "Split string by separator character"
+  (when (null string)
+    (return-from split-string '()))
+
+  (let ((result '())
+        (current "")
+        (len (length string)))
+
+    (loop for i from 0 below len
+          do (let ((char (char string i)))
+               (if (char= char separator)
+                   (progn
+                     (push current result)
+                     (setf current ""))
+                   (setf current (concatenate 'string current (string char))))))
+
+    ;; Add final part
+    (push current result)
+
+    ;; Return in correct order
+    (nreverse result)))
 
 (defun draw-scroll-bar (content-height total-entries scroll-offset cols)
   "Draw a scroll bar on the right side indicating scroll position"
