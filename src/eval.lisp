@@ -42,7 +42,8 @@
                ;; Handle /clear command to clear history
                ((string= (string-trim " " input-string) "/clear")
                 (progn
-                  (setf (repl-context-history ctx) '())
+                  (bt:with-lock-held ((repl-context-history-mutex ctx))
+                    (setf (repl-context-history ctx) '()))
                   "History cleared"))
 
                ;; Handle /config command to initialize configuration file
@@ -66,9 +67,10 @@
            (error (e)
              (format nil "Unhandled exception: ~A" e)))))
 
-    ;; Add to history (except for /clear command)
+    ;; Add to history (except for /clear command) - thread-safe
     (unless (string= (string-trim " " input-string) "/clear")
-      (push (make-history-item :command input-string :result result) (repl-context-history ctx)))
+      (bt:with-lock-held ((repl-context-history-mutex ctx))
+        (push (make-history-item :command input-string :result result) (repl-context-history ctx))))
 
     ;; Reset context state
     (setf (repl-context-history-index ctx) 0

@@ -1,5 +1,5 @@
 (in-package :tcode)
-
+(declaim (optimize (debug 3) (safety 3)))
 
 (defun main ()
   "Main entry point for tcode - creates a PTY-based terminal with curses-like interface"
@@ -55,13 +55,17 @@
   (content-height 0)
   (scroll-offset 0)
   (status-message "")
-  (state :normal)  ; :normal, :exit-warning
-  (context-directories (list (namestring (truename ".")))))
+  (state :normal)  ; :normal, :exit-warning, :waiting-for-command
+  (context-directories (list (namestring (truename "."))))
+  (current-thread nil)  ; Active background thread for HTTP requests
+  (history-mutex nil)   ; Mutex for thread-safe history updates
+  (current-stream nil)) ; Stream to close for cancellation
 
 (defun repl-loop (pty rows cols)
   "Main REPL loop with fixed prompt at bottom and scrollable history above"
   (declare (ignore pty))  ; PTY not used in current implementation
-  (let ((ctx (make-repl-context :content-height (- rows 4))))
+  (let ((ctx (make-repl-context :content-height (- rows 4)
+                                :history-mutex (bordeaux-threads:make-lock "history-mutex"))))
 
     ;; Initial screen setup
     (clear-screen)
@@ -70,8 +74,10 @@
     (loop
       (handler-case
           (progn
-            ;; Draw the content area with history
-            (draw-content-area (repl-context-content-height ctx) (repl-context-history ctx) (repl-context-scroll-offset ctx) cols)
+            ;; Draw the content area with history (thread-safe copy)
+            (let ((history-copy (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                                  (copy-list (repl-context-history ctx)))))
+              (draw-content-area (repl-context-content-height ctx) history-copy (repl-context-scroll-offset ctx) cols))
 
             ;; Update prompt area
             (draw-bottom-interface rows cols (repl-context-input-buffer ctx) (repl-context-cursor-position ctx) (repl-context-status-message ctx))
@@ -109,7 +115,8 @@
                    (cond
                      ;; Page Up key - scroll up to see older entries
                      ((string= escape-sequence "[5~")
-                      (let* ((total-entries (length (repl-context-history ctx)))
+                      (let* ((total-entries (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                                              (length (repl-context-history ctx))))
                              (entries-that-fit (floor (repl-context-content-height ctx) 3))
                              (max-scroll (max 0 (- total-entries entries-that-fit))))
                         (when (> total-entries entries-that-fit)
@@ -157,26 +164,34 @@
 
                      ;; Arrow Up key
                      ((string= escape-sequence "[A")
-                      (when (and (repl-context-history ctx) (< (repl-context-history-index ctx) (length (repl-context-history ctx))))
-                        ;; Save original input when first navigating into history
-                        (when (= (repl-context-history-index ctx) 0)
-                          (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
-                        (incf (repl-context-history-index ctx))
-                        (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))
-                              (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
-                              (repl-context-state ctx) :normal
-                              (repl-context-status-message ctx) "")))
+                      (let ((history-length (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                                              (length (repl-context-history ctx)))))
+                        (when (and (> history-length 0) (< (repl-context-history-index ctx) history-length))
+                          ;; Save original input when first navigating into history
+                          (when (= (repl-context-history-index ctx) 0)
+                            (setf (repl-context-original-input ctx) (repl-context-input-buffer ctx)))
+                          (incf (repl-context-history-index ctx))
+                          (let ((history-item (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                                                (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
+                            (setf (repl-context-input-buffer ctx) (history-item-command history-item)
+                                  (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
+                                  (repl-context-state ctx) :normal
+                                  (repl-context-status-message ctx) "")))))
 
                      ;; Arrow Down key
                      ((string= escape-sequence "[B")
-                      (when (and (repl-context-history ctx) (> (repl-context-history-index ctx) 0))
-                        (decf (repl-context-history-index ctx))
-                        (if (= (repl-context-history-index ctx) 0)
-                            (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
-                            (setf (repl-context-input-buffer ctx) (history-item-command (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
-                        (setf (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
-                              (repl-context-state ctx) :normal
-                              (repl-context-status-message ctx) "")))
+                      (let ((history-length (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                                              (length (repl-context-history ctx)))))
+                        (when (and (> history-length 0) (> (repl-context-history-index ctx) 0))
+                          (decf (repl-context-history-index ctx))
+                          (if (= (repl-context-history-index ctx) 0)
+                              (setf (repl-context-input-buffer ctx) (repl-context-original-input ctx))
+                              (let ((history-item (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                                                    (nth (1- (repl-context-history-index ctx)) (repl-context-history ctx)))))
+                                (setf (repl-context-input-buffer ctx) (history-item-command history-item))))
+                          (setf (repl-context-cursor-position ctx) (length (repl-context-input-buffer ctx))
+                                (repl-context-state ctx) :normal
+                                (repl-context-status-message ctx) ""))))
 
                      ;; Arrow Left key
                      ((string= escape-sequence "[D")
@@ -192,11 +207,27 @@
                         (setf (repl-context-state ctx) :normal
                               (repl-context-status-message ctx) "")))
 
-                     ;; Standalone ESC - exit
+                     ;; Standalone ESC - cancel request if waiting, otherwise exit
                      ((string= escape-sequence "")
-                      (clear-screen)
-                      (move-cursor 1 1)
-                      (return)))))
+                      (if (eq (repl-context-state ctx) :waiting-for-command)
+                          ;; Cancel the active request
+                          (progn
+                            (when (repl-context-current-thread ctx)
+                              ;; Close stream to interrupt HTTP request
+                              (when (repl-context-current-stream ctx)
+                                (ignore-errors (close (repl-context-current-stream ctx))))
+                              ;; Wait for thread to finish
+                              (ignore-errors (bordeaux-threads:join-thread (repl-context-current-thread ctx)))
+                              (setf (repl-context-current-thread ctx) nil
+                                    (repl-context-current-stream ctx) nil))
+                            ;; Reset state
+                            (setf (repl-context-state ctx) :normal
+                                  (repl-context-status-message ctx) "Request cancelled"))
+                          ;; Normal ESC behavior - exit
+                          (progn
+                            (clear-screen)
+                            (move-cursor 1 1)
+                            (return)))))))
 
                 ;; Enter - process input
                 ((or (char= char #\Return) (char= char #\Newline))
@@ -211,7 +242,7 @@
                      (submit-command trimmed-input ctx))))
 
                 ;; Backspace - remove character to the left of cursor
-                ((or (char= char #\Backspace) (char= char #\Del))
+                ((or (char= char #\Backspace) (char= char #\Rubout))
                  (when (and (> (length (repl-context-input-buffer ctx)) 0)
                             (> (repl-context-cursor-position ctx) 0))
                    (let* ((current-buffer (repl-context-input-buffer ctx))
@@ -264,8 +295,9 @@
 
                 ;; Ctrl+L to clear content area only
                 ((char= char (code-char 12)) ; Ctrl+L
-                 (setf (repl-context-history ctx) '()
-                       (repl-context-scroll-offset ctx) 0
+                 (bordeaux-threads:with-lock-held ((repl-context-history-mutex ctx))
+                   (setf (repl-context-history ctx) '()))
+                 (setf (repl-context-scroll-offset ctx) 0
                        (repl-context-state ctx) :normal
                        (repl-context-status-message ctx) ""))
 
