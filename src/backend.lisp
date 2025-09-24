@@ -31,31 +31,52 @@
                          ("messages" (vector (jsown:new-js
                                                ("role" "user")
                                                ("content" input-string))))
-)))
+                         ("stream" t))))
              (accumulated-response ""))
 
-        (let ((raw-response (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
-                                                :method :post
-                                                :content payload
-                                                :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
-                                                                     ("Content-Type" . "application/json")))))
-          ;; Convert byte array to string and parse JSON response
+        (let ((stream (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
+                                          :method :post
+                                          :content payload
+                                          :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
+                                                               ("Content-Type" . "application/json"))
+                                          :want-stream t)))
+
           (handler-case
-              (let* ((response-string (if (stringp raw-response)
-                                          raw-response
-                                          (flexi-streams:octets-to-string raw-response :external-format :utf-8)))
-                     (json-response (jsown:parse response-string)))
-                (handler-case
-                    (let* ((choices (jsown:val json-response "choices"))
-                           (first-choice (if (vectorp choices) (aref choices 0) (first choices)))
-                           (message (jsown:val first-choice "message"))
-                           (content (jsown:val message "content")))
-                      (if (stringp content)
-                          content
-                          (format nil "~A" content)))
-                  (error (parse-err)
-                    (format nil "JSON parsing failed: ~A~%Raw response: ~A" parse-err response-string))))
+              (loop for line = (read-line stream nil nil)
+                    while line do
+                      (progn
+                        ;; Skip empty lines and non-data lines
+                        (when (and (> (length line) 0)
+                                   (string= "data: " (subseq line 0 (min 6 (length line)))))
+
+                          (let ((json-data (subseq line 6))) ; Remove "data: " prefix
+
+                            ;; Check for end of stream
+                            (if (string= json-data "[DONE]")
+                                (return accumulated-response)
+
+                                ;; Parse and process the chunk
+                                (handler-case
+                                    (let* ((parsed (jsown:parse json-data))
+                                           (choices (jsown:val parsed "choices"))
+                                           (first-choice (if (vectorp choices) (aref choices 0) (first choices)))
+                                           (delta (jsown:val first-choice "delta"))
+                                           (content (jsown:val delta "content")))
+
+                                      (when content
+                                        (setf accumulated-response (concatenate 'string accumulated-response content))
+                                        ;; Output content immediately for real-time display
+                                        (format t "~A" content)
+                                        (finish-output)))
+
+                                  (error (parse-err)
+                                    ;; Continue processing even if one chunk fails
+                                    nil)))))))
             (error (e)
-              (format nil "Response parsing error: ~A" e)))))
+              (close stream)
+              (format nil "Stream processing error: ~A" e)))
+
+          (close stream)
+          accumulated-response))
     (error (e)
       (format nil "Backend error: ~A" e))))
