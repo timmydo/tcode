@@ -402,71 +402,65 @@
   (move-cursor (- rows 2) (+ 8 cursor-position))
   (force-output))
 
+(defun history-to-display-lines (history content-width)
+  "Convert all history items to a list of display lines with proper formatting"
+  (let ((display-lines '()))
+    ;; Process all history entries from newest to oldest
+    (loop for hist-item in history
+          do
+          ;; Add command lines
+          (let ((cmd-lines (wrap-text (history-item-command hist-item) content-width)))
+            (loop for line in cmd-lines
+                  for first-line = t then nil
+                  do
+                  (if first-line
+                      (push (format nil "~C[36mtcode> ~C[0m~A" #\Escape #\Escape line) display-lines)
+                      (push line display-lines))))
+
+          ;; Add result lines if present
+          (when (history-item-result hist-item)
+            (let ((result-lines (wrap-text (format nil "~A" (history-item-result hist-item)) content-width)))
+              (loop for line in result-lines
+                    do (push line display-lines))))
+
+          ;; Add blank line between entries
+          (push "" display-lines))
+
+    ;; Return lines in correct order (newest first)
+    (nreverse display-lines)))
+
 (defun draw-content-area (content-height history scroll-offset cols)
   "Draw the scrollable content area with history items"
-  (let ((total-entries (length history))
-        (current-row 1)
-        (content-width (- cols 2))) ; Reserve 2 columns for scroll bar
+  (let* ((content-width (- cols 2))
+         (display-lines (history-to-display-lines history content-width)))
+    (draw-lines content-height display-lines scroll-offset)
+    (draw-scroll-bar content-height (length history) scroll-offset cols)
+    (force-output)))
 
+(defun draw-lines (content-height lines scroll-offset)
+  "Draw a list of lines in the content area with scrolling support"
+  (let ((current-row 1)
+        (total-lines (length lines)))
     ;; Clear the content area
     (loop for row from 1 to content-height do
       (move-cursor row 1)
       (clear-line))
 
-    ;; Calculate which entries to show
-    ;; scroll-offset=0 means show most recent entries (default)
-    ;; Higher scroll-offset means show older entries
-    (when (> total-entries 0)
-      (let* ((entries-that-fit (floor content-height 3)) ; Each entry takes ~3 lines (cmd + result + blank)
-             ;; Since history is newest-first (push adds to front), we need to reverse indexing
-             ;; When scroll-offset=0, show entries from 0 to entries-that-fit (newest)
-             ;; When scroll-offset>0, show older entries
-             (start-index scroll-offset)
-             (end-index (min total-entries (+ scroll-offset entries-that-fit))))
+    ;; Calculate which lines to show based on scroll offset
+    ;; scroll-offset=0 means show newest lines (from the beginning of the list)
+    ;; Higher scroll-offset means show older lines (further into the list)
+    (when (> total-lines 0)
+      (let* ((start-line-index scroll-offset)
+             (end-line-index (min total-lines (+ scroll-offset content-height))))
 
-        ;; Display visible history entries and their results
-        (loop for i from (1- end-index) downto start-index
-              for hist-item = (nth i history)
+        ;; Draw visible lines
+        (loop for i from start-line-index below end-line-index
+              for line = (nth i lines)
+              while (<= current-row content-height)
               do
-              (when (<= current-row content-height)
-                ;; Display command (truncate if too long for content width)
-                (move-cursor current-row 1)
-                (set-color 6) ; Cyan
-                (format t "tcode> ")
-                (reset-color)
-                (let ((cmd-lines (wrap-text (history-item-command hist-item) content-width)))
-                  (loop for line in cmd-lines
-                        for first-line = t then nil
-                        do
-                        (when (<= current-row content-height)
-                          (when (not first-line)
-                            (move-cursor current-row 1))
-                          (format t "~A" line)
-                          (incf current-row)))))
-
-              (when (and (history-item-result hist-item) (<= current-row content-height))
-                ;; Display result with word wrapping
-                (move-cursor current-row 1)
-                (set-color 3) ; Yellow
-                (reset-color)
-                (let ((result-lines (wrap-text (format nil "~A" (history-item-result hist-item)) content-width)))
-                  (loop for line in result-lines
-                        for first-line = t then nil
-                        do
-                        (when (<= current-row content-height)
-                          (when (not first-line)
-                            (move-cursor current-row 1))
-                          (format t "~A" line)
-                          (incf current-row)))))
-
-              ;; Add blank line between entries if space allows
-              (when (<= current-row content-height)
-                (incf current-row)))))
-
-    ;; Draw scroll bar on the right side
-    (draw-scroll-bar content-height total-entries scroll-offset cols)
-
-    (force-output)))
+              (move-cursor current-row 1)
+              (format t "~A" line)
+              (incf current-row))))))
 
 (defun wrap-text (text max-width)
   "Break text into lines that fit within max-width, preferring word boundaries and respecting newlines"
@@ -572,5 +566,5 @@
           (loop for row from (1+ thumb-position) to (+ thumb-position thumb-size) do
             (when (<= row scrollbar-height)
               (move-cursor row scrollbar-col)
-              (format t "~C[97m█~C[0m" #\Escape #\Escape)))))))) ; White thumb
+              (format t "~C[97m█~C[0m" #\Escape #\Escape))))))))
 
