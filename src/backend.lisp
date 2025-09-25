@@ -24,10 +24,10 @@
 (defgeneric dispatch-command (backend input-string repl-context)
   (:documentation "Dispatch a command to the backend, create history item, and stream the response"))
 
-(defgeneric send-request (backend input-string repl-context)
+(defgeneric send-request (backend input-string repl-context history-item)
   (:documentation "Send HTTP request to backend and process streaming response"))
 
-(defun process-streaming-chunk (json-data accumulated-response repl-context)
+(defun process-streaming-chunk (json-data accumulated-response repl-context history-item)
   "Parse and process a single streaming chunk, returning updated accumulated response"
   (handler-case
       (let* ((parsed (jsown:parse json-data))
@@ -38,13 +38,13 @@
 
         (if content
             (let ((new-accumulated (concatenate 'string accumulated-response content)))
-              ;; Thread-safe update to history
+              ;; Thread-safe update to history item
               (bt:with-lock-held ((repl-context-mutex repl-context))
-                (when (repl-context-history repl-context)
-                  (setf (history-item-result (first (repl-context-history repl-context)))
-                        new-accumulated)))
+                (setf (history-item-result history-item) new-accumulated)
+                (log-debug "Updated history item result: ~A" new-accumulated))
               ;; Trigger display repaint when new content comes in
               (when (repl-context-repaint-callback repl-context)
+                (log-debug "Calling repaint callback")
                 (funcall (repl-context-repaint-callback repl-context)))
               new-accumulated)
             accumulated-response))
@@ -53,7 +53,7 @@
       (declare (ignore parse-err))
       accumulated-response)))
 
-(defun read-streaming-response (stream repl-context)
+(defun read-streaming-response (stream repl-context history-item)
   "Read and process streaming response from the HTTP stream"
   (let ((accumulated-response ""))
     (handler-case
@@ -72,16 +72,16 @@
 
                           ;; Parse and process the chunk
                           (setf accumulated-response
-                                (process-streaming-chunk json-data accumulated-response repl-context)))))))
+                                (process-streaming-chunk json-data accumulated-response repl-context history-item)))))))
       (error (e)
         (ignore-errors (close stream))
         (bt:with-lock-held ((repl-context-mutex repl-context))
-          (when (repl-context-history repl-context)
-            (setf (history-item-result (first (repl-context-history repl-context)))
-                  (format nil "Stream processing error: ~A" e))))))
+          (setf (history-item-result history-item)
+                (format nil "Stream processing error: ~A" e))
+          (log-error "Stream processing error: ~A" e))))
     accumulated-response))
 
-(defmethod send-request ((backend openrouter-connection) input-string repl-context)
+(defmethod send-request ((backend openrouter-connection) input-string repl-context history-item)
   "Send HTTP request to OpenRouter API and process streaming response"
   (let* ((api-key (openrouter-api-key backend))
          (model (if (boundp '*openrouter-default-model*)
@@ -95,6 +95,8 @@
                                            ("content" input-string))))
                      ("stream" t)))))
 
+    (log-debug "Sending HTTP request to OpenRouter API with model: ~A" model)
+
     ;; Make HTTP request
     (let ((stream (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
                                       :method :post
@@ -103,25 +105,32 @@
                                                            ("Content-Type" . "application/json"))
                                       :want-stream t)))
 
+      (log-debug "HTTP request initiated, processing streaming response")
+
       ;; Store stream for cancellation
       (setf (repl-context-current-stream repl-context) stream)
 
       ;; Read and process the streaming response
-      (let ((accumulated-response (read-streaming-response stream repl-context)))
+      (let ((accumulated-response (read-streaming-response stream repl-context history-item)))
         (ignore-errors (close stream))
+        (log-debug "Streaming response complete, final result length: ~A" (length accumulated-response))
 
         ;; Final result update
         (bt:with-lock-held ((repl-context-mutex repl-context))
-          (when (repl-context-history repl-context)
-            (setf (history-item-result (first (repl-context-history repl-context)))
-                  accumulated-response)))))))
+          (setf (history-item-result history-item) accumulated-response)
+          (log-debug "Final history item result updated"))))))
 
 (defmethod dispatch-command ((backend openrouter-connection) input-string repl-context)
   "Dispatch command to OpenRouter API with streaming response in background thread"
-  ;; Create history item first
-  (let ((initial-result "Processing request in background..."))
+  ;; Create history item first and store it in variable
+  (let* ((initial-result "Processing request in background...")
+         (history-item (make-history-item :command input-string :result initial-result)))
+
+    (log-debug "Creating history item for command: ~A" input-string)
     (bt:with-lock-held ((repl-context-mutex repl-context))
-      (push (make-history-item :command input-string :result initial-result) (repl-context-history repl-context)))
+      (push history-item (repl-context-history repl-context)))
+
+    (log-debug "History item added to repl context")
 
     ;; Set state to waiting
     (setf (repl-context-state repl-context) :waiting-for-command
@@ -131,12 +140,12 @@
     (let ((thread (make-thread-with-logging
                     (lambda ()
                       (handler-case
-                          (send-request backend input-string repl-context)
+                          (send-request backend input-string repl-context history-item)
                         (error (e)
                           (bt:with-lock-held ((repl-context-mutex repl-context))
-                            (when (repl-context-history repl-context)
-                              (setf (history-item-result (first (repl-context-history repl-context)))
-                                    (format nil "Backend error: ~A" e))))))
+                            (setf (history-item-result history-item)
+                                  (format nil "Backend error: ~A" e))
+                            (log-error "Backend error: ~A" e))))
 
                       ;; Reset state when done
                       (setf (repl-context-state repl-context) :normal
