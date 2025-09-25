@@ -469,9 +469,25 @@
     (force-output)))
 
 (defun wrap-text (text max-width)
-  "Break text into lines that fit within max-width, preferring word boundaries"
+  "Break text into lines that fit within max-width, preferring word boundaries and respecting newlines"
   (when (or (null text) (zerop (length text)))
     (return-from wrap-text '("")))
+
+  ;; First split by newlines, then wrap each line individually
+  (let ((all-lines '())
+        (newline-split (split-string text #\Newline)))
+
+    (dolist (line-text newline-split)
+      ;; For each line, apply word wrapping
+      (let ((wrapped-lines (wrap-line-by-words line-text max-width)))
+        (setf all-lines (append all-lines wrapped-lines))))
+
+    all-lines))
+
+(defun wrap-line-by-words (text max-width)
+  "Wrap a single line of text by word boundaries"
+  (when (or (null text) (zerop (length text)))
+    (return-from wrap-line-by-words '("")))
 
   (let ((lines '())
         (current-line "")

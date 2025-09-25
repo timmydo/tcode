@@ -99,6 +99,17 @@
     (format t "Input: 'Paragraph one.\\n\\nParagraph two.' (width 12)~%")
     (format t "Result: ~A~%" result))
 
+  ;; Test simple case that should ideally split on newline
+  (let* ((input (concatenate 'string "first" (string #\Newline) "second"))
+         (result (wrap-text input 80))
+         (expected '("first" "second")))
+    (format t "Input: 'first\\nsecond' (width 80)~%")
+    (format t "Result: ~A~%" result)
+    (format t "Expected: ~A~%" expected)
+    (format t "ISSUE: Should return ~A but returns ~A~%" expected result)
+    (format t "This demonstrates the core newline handling problem~%")
+    (assert (equal result expected) () "wrap-text should split on newlines"))
+
   (format t "Newline tests completed (behavior documented)~%"))
 
 (defun test-whitespace-handling ()
@@ -155,11 +166,6 @@
   (test-performance-edge-cases)
 
   (format t "~%=== SUMMARY ===~%")
-  (format t "Current wrap-text function works well for basic text wrapping.~%")
-  (format t "ISSUE IDENTIFIED: Does not handle newlines properly.~%")
-  (format t "- Newlines are treated as regular characters~%")
-  (format t "- Text with embedded newlines doesn't break at newline boundaries~%")
-  (format t "- For proper text formatting, newlines should be split first~%")
   (format t "~%All tests completed successfully!~%"))
 
 (defun run-all-wrap-text-tests ()
