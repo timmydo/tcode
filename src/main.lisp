@@ -434,14 +434,13 @@
                 (set-color 6) ; Cyan
                 (format t "tcode> ")
                 (reset-color)
-                (let ((cmd-lines (wrap-text (history-item-command hist-item) (- content-width 7))))
+                (let ((cmd-lines (wrap-text (history-item-command hist-item) content-width)))
                   (loop for line in cmd-lines
                         for first-line = t then nil
                         do
                         (when (<= current-row content-height)
                           (when (not first-line)
-                            (move-cursor current-row 1)
-                            (format t "       ")) ; 7 spaces to align continuation lines
+                            (move-cursor current-row 1))
                           (format t "~A" line)
                           (incf current-row)))))
 

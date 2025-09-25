@@ -38,13 +38,12 @@
 
         (if content
             (let ((new-accumulated (concatenate 'string accumulated-response content)))
+	      (log-debug "New content: '~A'" content)
               ;; Thread-safe update to history item
               (bt:with-lock-held ((repl-context-mutex repl-context))
-                (setf (history-item-result history-item) new-accumulated)
-                (log-debug "Updated history item result: ~A" new-accumulated))
+                (setf (history-item-result history-item) new-accumulated))
               ;; Trigger display repaint when new content comes in
               (when (repl-context-repaint-callback repl-context)
-                (log-debug "Calling repaint callback")
                 (funcall (repl-context-repaint-callback repl-context)))
               new-accumulated)
             accumulated-response))
