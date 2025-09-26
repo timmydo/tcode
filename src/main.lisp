@@ -140,16 +140,21 @@
                    (cond
                      ;; Page Up key - scroll up to see older entries
                      ((string= escape-sequence "[5~")
-                      (let* ((total-entries (bt:with-lock-held ((repl-context-mutex ctx))
-                                              (length (repl-context-history ctx))))
-                             (entries-that-fit (floor (repl-context-content-height ctx) 3))
-                             (max-scroll (max 0 (- total-entries entries-that-fit))))
-                        (when (> total-entries entries-that-fit)
-                          (setf (repl-context-scroll-offset ctx) (min max-scroll (+ (repl-context-scroll-offset ctx) 3))))))
+                      (let* ((history-copy (bt:with-lock-held ((repl-context-mutex ctx))
+                                             (copy-list (repl-context-history ctx))))
+                             (content-width (- cols 2))
+                             (display-lines (history-to-display-lines history-copy content-width))
+                             (total-lines (length display-lines))
+                             (lines-that-fit (repl-context-content-height ctx))
+                             (max-scroll (max 0 (- total-lines lines-that-fit)))
+                             (scroll-step (max 1 (floor lines-that-fit 3))))
+                        (when (> total-lines lines-that-fit)
+                          (setf (repl-context-scroll-offset ctx) (min max-scroll (+ (repl-context-scroll-offset ctx) scroll-step))))))
 
                      ;; Page Down key - scroll down to see newer entries
                      ((string= escape-sequence "[6~")
-                      (setf (repl-context-scroll-offset ctx) (max 0 (- (repl-context-scroll-offset ctx) 3))))
+                      (let ((scroll-step (max 1 (floor (repl-context-content-height ctx) 3))))
+                        (setf (repl-context-scroll-offset ctx) (max 0 (- (repl-context-scroll-offset ctx) scroll-step)))))
 
                      ;; Delete key - delete character under cursor
                      ;; Different terminals send different sequences for Delete
@@ -434,7 +439,7 @@
   (let* ((content-width (- cols 2))
          (display-lines (history-to-display-lines history content-width)))
     (draw-lines content-height display-lines scroll-offset)
-    (draw-scroll-bar content-height (length history) scroll-offset cols)
+    (draw-scroll-bar content-height (length display-lines) scroll-offset cols)
     (force-output)))
 
 (defun draw-lines (content-height lines scroll-offset)
@@ -447,11 +452,15 @@
       (clear-line))
 
     ;; Calculate which lines to show based on scroll offset
-    ;; scroll-offset=0 means show newest lines (from the beginning of the list)
-    ;; Higher scroll-offset means show older lines (further into the list)
+    ;; scroll-offset=0 means show newest lines (from the end of the list)
+    ;; Higher scroll-offset means show older lines (from earlier in the list)
     (when (> total-lines 0)
-      (let* ((start-line-index scroll-offset)
-             (end-line-index (min total-lines (+ scroll-offset content-height))))
+      (let* ((lines-that-fit content-height)
+             ;; Default behavior: show the most recent lines (bottom of history)
+             (default-start-index (max 0 (- total-lines lines-that-fit)))
+             ;; Apply scroll offset: higher offset shows older content
+             (start-line-index (max 0 (- default-start-index scroll-offset)))
+             (end-line-index (min total-lines (+ start-line-index lines-that-fit))))
 
         ;; Draw visible lines
         (loop for i from start-line-index below end-line-index
@@ -539,23 +548,24 @@
     ;; Return in correct order
     (nreverse result)))
 
-(defun draw-scroll-bar (content-height total-entries scroll-offset cols)
+(defun draw-scroll-bar (content-height total-lines scroll-offset cols)
   "Draw a scroll bar on the right side indicating scroll position"
-  (when (> total-entries 0)
-    (let* ((entries-that-fit (floor content-height 3))
+  (when (> total-lines 0)
+    (let* ((lines-that-fit content-height)
            (scrollbar-col (- cols 1))
            (scrollbar-height content-height)
-           (total-scrollable (max 0 (- total-entries entries-that-fit))))
+           (total-scrollable (max 0 (- total-lines lines-that-fit))))
 
       ;; Only show scroll bar if there's content to scroll
       (when (> total-scrollable 0)
         ;; Calculate thumb position and size
-        (let* ((thumb-size (max 1 (floor (* scrollbar-height entries-that-fit) total-entries)))
+        (let* ((thumb-size (max 1 (floor (* scrollbar-height lines-that-fit) total-lines)))
                (scrollable-range (- scrollbar-height thumb-size))
-               ;; Reverse the thumb position since scroll-offset=0 should show thumb at bottom (newest)
+               ;; Calculate thumb position: scroll-offset=0 shows thumb at bottom (newest content)
+               ;; Higher scroll-offset moves thumb toward top (older content)
                (thumb-position (if (> total-scrollable 0)
                                  (- scrollable-range (floor (* scrollable-range scroll-offset) total-scrollable))
-                                 0)))
+                                 scrollable-range)))
 
           ;; Draw scroll track (background)
           (loop for row from 1 to scrollbar-height do
