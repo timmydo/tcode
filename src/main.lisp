@@ -405,8 +405,8 @@
 (defun history-to-display-lines (history content-width)
   "Convert all history items to a list of display lines with proper formatting"
   (let ((display-lines '()))
-    ;; Process all history entries from newest to oldest
-    (loop for hist-item in history
+    ;; Process all history entries from oldest to newest (reverse the list)
+    (loop for hist-item in (reverse history)
           do
           ;; Add command lines
           (let ((cmd-lines (wrap-text (history-item-command hist-item) content-width)))
@@ -426,7 +426,7 @@
           ;; Add blank line between entries
           (push "" display-lines))
 
-    ;; Return lines in correct order (newest first)
+    ;; Return lines in correct order (newest last)
     (nreverse display-lines)))
 
 (defun draw-content-area (content-height history scroll-offset cols)

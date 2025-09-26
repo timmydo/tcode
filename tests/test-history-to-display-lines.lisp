@@ -51,18 +51,18 @@
   "Test history-to-display-lines with multiple items"
   (let* ((item1 (make-history-item :command "(+ 1 2)" :result 3))
          (item2 (make-history-item :command "(* 4 5)" :result 20))
-         (history (list item1 item2)) ; newest first
+         (history (list item1 item2)) ; newest first in history list
          (result (history-to-display-lines history 80)))
     (and (= (length result) 6) ; 2 commands + 2 results + 2 blank lines
-         ;; First item (newest)
+         ;; Second item (older) appears first in display
          (string= (first result)
-                  (format nil "~C[36mtcode> ~C[0m(+ 1 2)" #\Escape #\Escape))
-         (string= (second result) "3")
-         (string= (third result) "")
-         ;; Second item (older)
-         (string= (fourth result)
                   (format nil "~C[36mtcode> ~C[0m(* 4 5)" #\Escape #\Escape))
-         (string= (fifth result) "20")
+         (string= (second result) "20")
+         (string= (third result) "")
+         ;; First item (newer) appears last in display
+         (string= (fourth result)
+                  (format nil "~C[36mtcode> ~C[0m(+ 1 2)" #\Escape #\Escape))
+         (string= (fifth result) "3")
          (string= (sixth result) ""))))
 
 (defun test-command-wrapping ()
