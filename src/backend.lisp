@@ -89,15 +89,31 @@
          (model (if (boundp '*openrouter-default-model*)
                     *openrouter-default-model*
                     "x-ai/grok-4-fast:free"))
+         ;; Build messages vector from history
+         (messages-list (bt:with-lock-held ((repl-context-mutex repl-context))
+                          (let ((messages '()))
+                            ;; Add previous history items (in reverse order since history is newest-first)
+                            (dolist (item (reverse (repl-context-history repl-context)))
+                              (when (and (history-item-command item)
+                                        (history-item-result item)
+                                        (stringp (history-item-result item))
+                                        (> (length (history-item-result item)) 0))
+                                ;; Add user message
+                                (push (jsown:new-js ("role" "user") ("content" (history-item-command item))) messages)
+                                ;; Add assistant response
+                                (push (jsown:new-js ("role" "assistant") ("content" (history-item-result item))) messages)))
+                            ;; Add current user input
+                            (push (jsown:new-js ("role" "user") ("content" input-string)) messages)
+                            (nreverse messages))))
+         (messages-vector (make-array (length messages-list) :initial-contents messages-list))
          (payload (jsown:to-json
                    (jsown:new-js
                      ("model" model)
-                     ("messages" (vector (jsown:new-js
-                                           ("role" "user")
-                                           ("content" input-string))))
+                     ("messages" messages-vector)
                      ("stream" t)))))
 
     (log-debug "Sending HTTP request to OpenRouter API with model: ~A" model)
+    (log-debug "Payload with ~A messages: ~A" (length messages-vector) payload)
 
     ;; Make HTTP request
     (let ((stream (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
@@ -108,6 +124,11 @@
                                       :want-stream t)))
 
       (log-debug "HTTP request initiated, processing streaming response")
+
+      (log-debug "Creating history item for command: ~A" input-string)
+      (bt:with-lock-held ((repl-context-mutex repl-context))
+	(push history-item (repl-context-history repl-context)))
+
 
       ;; Store stream for cancellation
       (setf (repl-context-current-stream repl-context) stream)
@@ -127,10 +148,6 @@
   ;; Create history item first and store it in variable
   (let* ((initial-result "Processing request in background...")
          (history-item (make-history-item :command input-string :result initial-result)))
-
-    (log-debug "Creating history item for command: ~A" input-string)
-    (bt:with-lock-held ((repl-context-mutex repl-context))
-      (push history-item (repl-context-history repl-context)))
 
     (log-debug "History item added to repl context")
 
