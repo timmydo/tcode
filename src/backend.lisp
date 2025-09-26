@@ -65,6 +65,9 @@
 
                     (let ((json-data (subseq line 6))) ; Remove "data: " prefix
 
+                      ;; Log the actual JSON response data
+                      (log-debug "Raw JSON chunk: ~A" json-data)
+
                       ;; Check for end of stream
                       (if (string= json-data "[DONE]")
                           (return accumulated-response)

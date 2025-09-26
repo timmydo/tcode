@@ -65,6 +65,24 @@
                     (push (make-history-item :command input-string :result result) (repl-context-history ctx)))
                   result))
 
+               ;; Handle /lorem command to add test history items with lorem ipsum
+               ((and (>= (length input-string) 6)
+                     (string= (subseq input-string 0 6) "/lorem"))
+                (let* ((param-str (string-trim " " (subseq input-string 6)))
+                       (count (if (> (length param-str) 0)
+                                  (handler-case
+                                      (parse-integer param-str)
+                                    (error () 1))
+                                  1))
+                       (lorem-paragraph "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.")
+                       (lorem-command (format nil "Generate ~A paragraph~:P of lorem ipsum" count))
+                       (lorem-response (format nil "~{~A~^~%~%~}" (make-list count :initial-element lorem-paragraph)))
+                       (history-item (make-history-item :command lorem-command :result lorem-response)))
+                  ;; Add lorem history item
+                  (bt:with-lock-held ((repl-context-mutex ctx))
+                    (push history-item (repl-context-history ctx)))
+                  (format nil "Added lorem ipsum test history item with ~A paragraph~:P" count)))
+
                ;; Default: dispatch to backend only
                (t (if (and (boundp '*tcode-backend*) *tcode-backend*)
                       ;; Dispatch to backend
