@@ -42,9 +42,6 @@
               ;; Thread-safe update to history item
               (bt:with-lock-held ((repl-context-mutex repl-context))
                 (setf (history-item-result history-item) new-accumulated))
-              ;; Trigger display repaint when new content comes in
-              (when (repl-context-repaint-callback repl-context)
-                (funcall (repl-context-repaint-callback repl-context)))
               new-accumulated)
             accumulated-response))
     (error (parse-err)
@@ -152,8 +149,7 @@
     (log-debug "History item added to repl context")
 
     ;; Set state to waiting
-    (setf (repl-context-state repl-context) :waiting-for-command
-          (repl-context-status-message repl-context) "Waiting for response...")
+    (setf (repl-context-state repl-context) :waiting-for-command)
 
     ;; Create background thread for HTTP request
     (let ((thread (make-thread-with-logging
@@ -169,8 +165,7 @@
                       ;; Reset state when done
                       (setf (repl-context-state repl-context) :normal
                             (repl-context-current-thread repl-context) nil
-                            (repl-context-current-stream repl-context) nil
-                            (repl-context-status-message repl-context) ""))
+                            (repl-context-current-stream repl-context) nil))
                     :name "http-request-thread")))
 
       ;; Store thread reference

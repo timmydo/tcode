@@ -110,25 +110,14 @@
 
 
     ;; Reset context state
-    (setf (repl-context-history-index ctx) 0
-          (repl-context-scroll-offset ctx) 0
-          (repl-context-input-buffer ctx) ""
-          (repl-context-cursor-position ctx) 0
-          (repl-context-original-input ctx) ""
-          (repl-context-state ctx) :normal)
+    (setf (repl-context-state ctx) :normal)
 
     ;; Update status with directory list after /add or /rmdir commands
     (when (or (and (> (length input-string) 4)
                    (string= (subseq input-string 0 4) "/add"))
               (and (> (length input-string) 6)
                    (string= (subseq input-string 0 6) "/rmdir")))
-      (setf (repl-context-status-message ctx)
-            (if (> (length (repl-context-context-directories ctx)) 0)
-                (format nil "Dirs: ~{~A~^, ~}" (reverse (repl-context-context-directories ctx)))
-                "")))
+)
 
-    ;; Update status after /clear command
-    (when (string= (string-trim " " input-string) "/clear")
-      (setf (repl-context-status-message ctx) "History cleared"))
 
     result))

@@ -7,6 +7,7 @@
 
 (defvar *web-ui-instance* nil)
 (defvar *server-running* nil)
+(defvar *global-history* '())
 
 (defun quit-tcode ()
   "Quit tcode without prompting."
@@ -15,6 +16,29 @@
   (bt:make-thread
    (lambda () (sleep 0.5) (uiop:quit 0))
    :name "quit-thread"))
+
+(defun split-string (string separator)
+  "Split string by separator character"
+  (when (null string)
+    (return-from split-string '()))
+
+  (let ((result '())
+        (current "")
+        (len (length string)))
+
+    (loop for i from 0 below len
+          do (let ((char (char string i)))
+               (if (char= char separator)
+                   (progn
+                     (push current result)
+                     (setf current ""))
+                   (setf current (concatenate 'string current (string char))))))
+
+    ;; Add final part
+    (push current result)
+
+    ;; Return in correct order
+    (nreverse result)))
 
 (defparameter *html-template*
   "<!DOCTYPE html>
@@ -326,6 +350,8 @@
       (setf command (jsown:val json-data "command")))
 
     (when command
+      ;; Log the submitted command
+      (log-command command)
       ;; Create a temporary context for command processing
       (let ((ctx (make-repl-context :mutex (make-lock-with-logging "web-repl-mutex"))))
         (submit-command command ctx)))
@@ -342,8 +368,6 @@
                                                 ("result" (format nil "~A" (history-item-result item)))))
                                             (reverse history-data))))))
     (send-json-response stream (jsown:to-json json-history))))
-
-(defvar *global-history* '())
 
 (defun add-to-global-history (command result)
   "Add command and result to global history."

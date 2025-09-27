@@ -9,7 +9,6 @@
   :components (
                (:file "tcode-package")
                (:file "backend")
-               (:file "pty")
                (:file "config")
                (:file "logs")
                (:file "locks")
