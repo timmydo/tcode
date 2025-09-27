@@ -363,12 +363,16 @@
         }
 
         function displayHistory(historyDOM) {
+            const contentArea = document.getElementById('content-area');
+            const wasAtBottom = contentArea.scrollTop >= contentArea.scrollHeight - contentArea.clientHeight - 10;
+
             // Use DOM reconciliation instead of innerHTML replacement
             updateDOMFromJSON(historyContainer, historyDOM);
 
-            // Scroll to bottom
-            const contentArea = document.getElementById('content-area');
-            contentArea.scrollTop = contentArea.scrollHeight;
+            // Only scroll to bottom if user was already at bottom (auto-scroll new content)
+            if (wasAtBottom) {
+                contentArea.scrollTop = contentArea.scrollHeight;
+            }
         }
 
         function displayHistoryOld(history) {
@@ -393,9 +397,6 @@
                 historyContainer.appendChild(historyItem);
             });
 
-            // Scroll to bottom
-            const contentArea = document.getElementById('content-area');
-            contentArea.scrollTop = contentArea.scrollHeight;
         }
 
         // Initial history load
