@@ -349,6 +349,9 @@
       (setf json-data (jsown:parse body))
       (setf command (jsown:val json-data "command")))
 
+    (unless command
+      (log-info "Command not found: ~A" json-data))
+    
     (when command
       ;; Log the submitted command
       (log-command command)
