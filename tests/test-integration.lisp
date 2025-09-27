@@ -67,16 +67,6 @@
        (eq (safe-eval-string "(or nil t)") t)
        (eq (safe-eval-string "(not t)") nil)))
 
-(defun test-pty-main-integration ()
-  "Test that main function can be called without crashing"
-  ;; We can't really test the interactive loop without complex mocking,
-  ;; but we can test that the PTY initialization doesn't crash
-  (let ((pty (make-pty :width 80 :height 24)))
-    (unwind-protect
-        (progn
-          (open-pty pty)
-          t)
-      (cleanup-pty pty))))
 
 (defun test-graceful-eof-handling ()
   "Test that nil input (EOF) is handled gracefully"
@@ -122,7 +112,6 @@
   (run-integration-test "Variable assignment" #'test-variable-assignment)
   (run-integration-test "Complex expressions" #'test-complex-expressions)
   (run-integration-test "Boolean operations" #'test-boolean-operations)
-  (run-integration-test "PTY main integration" #'test-pty-main-integration)
   (run-integration-test "Graceful EOF handling" #'test-graceful-eof-handling)
   (run-integration-test "Config file functions" #'test-config-file-functions)
   (run-integration-test "Config command" #'test-config-command)

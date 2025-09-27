@@ -26,8 +26,8 @@
     (let ((result (submit-command "/rmdir " ctx)))
       (format t "Test 3 - Remove with empty path: ~A~%" result))
 
-    ;; Test status message update
-    (format t "Status message: ~A~%" (repl-context-status-message ctx))))
+    ;; Check final state
+    (format t "Final context state: ~A~%" (repl-context-state ctx))))
 
 (defun run-all-rmdir-tests ()
   "Run all rmdir tests"

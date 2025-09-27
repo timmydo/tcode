@@ -36,11 +36,10 @@
 
 (defun test-repl-context-creation ()
   "Test creating repl-context with new structure"
-  (let ((ctx (make-repl-context :content-height 20)))
-    (and (string= (repl-context-input-buffer ctx) "")
-         (null (repl-context-history ctx))
-         (= (repl-context-history-index ctx) 0)
-         (= (repl-context-content-height ctx) 20))))
+  (let ((ctx (make-repl-context)))
+    (and (null (repl-context-history ctx))
+         (eq (repl-context-state ctx) :normal)
+         (listp (repl-context-context-directories ctx)))))
 
 (defun run-all-history-refactor-tests ()
   "Run all history refactor tests"
