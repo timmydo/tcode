@@ -2,58 +2,54 @@
 (declaim (optimize (debug 3) (safety 3)))
 
 (defun main (&optional test-mode)
-  "Main entry point for tcode - creates a PTY-based terminal with curses-like interface.
-   If test-mode is true, exits immediately without PTY operations for compile checking."
-  ;; Early exit for test mode to allow compilation checking without PTY operations
+  "Main entry point for tcode - creates a webview-based interface.
+   If test-mode is true, exits immediately without webview operations for compile checking."
+  ;; Early exit for test mode to allow compilation checking without webview operations
   (when test-mode
-    (format t "Test mode: Compilation successful, exiting without PTY operations.~%")
+    (format t "Test mode: Compilation successful, exiting without webview operations.~%")
     (return-from main t))
 
-  (multiple-value-bind (rows cols) (get-terminal-size)
-    (let ((pty (make-pty :width cols :height rows)))
-    (unwind-protect
-        (handler-case
-            (progn
-              ;; Initialize logging system
-              (initialize-logging)
+  (handler-case
+      (progn
+        ;; Initialize logging system
+        (initialize-logging)
 
-              ;; Open the PTY
-              (open-pty pty)
+        ;; Load configuration file
+        (unless (load-config-file)
+          ;; If config loading failed, exit
+          (log-error "Failed to load configuration file")
+          (cleanup-logging)
+          (return-from main nil))
 
-              ;; Load configuration file
-              (unless (load-config-file)
-                ;; If config loading failed, exit
-                (log-error "Failed to load configuration file")
-                (cleanup-logging)
-                (return-from main nil))
+        ;; Create web UI and find available port
+        (let ((ui (make-web-ui))
+              (port (let ((env-port (uiop:getenv "TCODE_PORT")))
+                      (if env-port
+                          (parse-integer env-port :junk-allowed t)
+                          (find-available-port)))))
 
-              ;; Enable raw mode for curses-like interface
-              (enable-raw-mode 0)
+          ;; Start the server in a background thread
+          (bt:make-thread
+           (lambda ()
+             (run-web-ui ui port))
+           :name "tcode-server")
 
-              ;; Initialize screen
-              (clear-screen)
-              (set-color 2) ; Green
-              (format t "tcode - Terminal-based CLI")
-              (reset-color)
-              (move-cursor 2 1)
-              (format t "PTY session active. Type 'exit' or Ctrl+C to quit.")
-              (move-cursor 4 1)
+          ;; Give the server a moment to start
+          (sleep 1)
 
-              ;; Start the main REPL loop
-              (repl-loop pty rows cols))
+          ;; Launch webview pointing to the server
+          (run-webview :title "tcode - Terminal-based CLI"
+                       :url (format nil "http://127.0.0.1:~D" port)
+                       :width 1200
+                       :height 800)
 
+          ;; Exit when webview closes
+          (uiop:quit)))
 
-          (error (e)
-            (log-error "Error in main: ~A" e)
-            (move-cursor (- rows 4) 1)
-            (set-color 1) ; Red
-            (format t "Error in main: ~A" e)
-            (reset-color)))
-
-      ;; Always cleanup, even on errors
-      (disable-raw-mode 0)
-      (cleanup-pty pty)
-      (cleanup-logging)))))
+    (error (e)
+      (log-error "Error in main: ~A" e)
+      (format t "Error in main: ~A~%" e)
+      (cleanup-logging))))
 
 (defstruct history-item
   (command "")

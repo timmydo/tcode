@@ -13,10 +13,10 @@ fi
 
 # unsetting home will break our terminal
 #export HOME=""
-#  --eval '(sb-int:set-floating-point-modes :traps nil)' \
 
 if [ -d "/gnu/store" ]; then
   exec sbcl --noinform --no-userinit --non-interactive \
+    --eval '(sb-int:set-floating-point-modes :traps nil)' \
     --eval "(require \"asdf\")" \
     --eval "(asdf:load-system :cl+ssl/config)" \
     --eval "(cl+ssl/config:define-libssl-path \"$OPENSSL_PATH/lib/libssl.so\")" \
@@ -25,6 +25,7 @@ if [ -d "/gnu/store" ]; then
     --eval '(tcode:main)'
 else
   exec sbcl --noinform --no-userinit --non-interactive \
+    --eval '(sb-int:set-floating-point-modes :traps nil)' \
     --eval "(require \"asdf\")" \
     --eval '(asdf:load-system :tcode)' \
     --eval '(tcode:main)'
