@@ -83,8 +83,14 @@
 
 (defun log-command (command)
   "Log a user command"
-  (log-info "Command executed: ~A" command))
+  (let ((message (format nil "Command executed: ~A" command)))
+    (format t "~A~%" message)
+    (finish-output t)
+    (log-info "~A" message)))
 
 (defun log-result (result)
   "Log a command result"
-  (log-debug "Command result: ~A" result))
+  (let ((message (format nil "Command result: ~A" result)))
+    (format t "~A~%" message)
+    (finish-output t)
+    (log-debug "~A" message)))

@@ -8,6 +8,7 @@
   :serial t
   :components (
                (:file "tcode-package")
+               (:file "struct")
                (:file "backend")
                (:file "config")
                (:file "logs")
