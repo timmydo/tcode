@@ -30,9 +30,6 @@
                   ;; Add to history
                   (bt:with-lock-held ((repl-context-mutex ctx))
                     (push (make-history-item :command input-string :result result) (repl-context-history ctx)))
-                  ;; Add to global history for web UI
-                  (when (boundp '*global-history*)
-                    (add-to-global-history input-string result))
                   result))
 
                ;; Handle /rmdir command for directory management
@@ -49,9 +46,6 @@
                   ;; Add to history
                   (bt:with-lock-held ((repl-context-mutex ctx))
                     (push (make-history-item :command input-string :result result) (repl-context-history ctx)))
-                  ;; Add to global history for web UI
-                  (when (boundp '*global-history*)
-                    (add-to-global-history input-string result))
                   result))
 
                ;; Handle /clear command to clear history

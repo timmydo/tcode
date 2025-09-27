@@ -7,7 +7,7 @@
 
 (defvar *web-ui-instance* nil)
 (defvar *server-running* nil)
-(defvar *global-history* '())
+(defvar *web-repl-context* nil)
 
 (defun quit-tcode ()
   "Quit tcode without prompting."
@@ -286,6 +286,9 @@
   (setf *web-ui-instance* ui)
   (setf *server-running* t)
 
+  ;; Create a single repl-context for the web UI
+  (setf *web-repl-context* (make-repl-context :mutex (make-lock-with-logging "web-repl-mutex")))
+
   (let ((server-socket (usocket:socket-listen "127.0.0.1" port :reuse-address t :backlog 5)))
     (setf (server-socket ui) server-socket)
     (format t "tcode web server starting on port ~D~%" port)
@@ -362,15 +365,17 @@
     (when command
       ;; Log the submitted command
       (log-command command)
-      ;; Create a temporary context for command processing
-      (let ((ctx (make-repl-context :mutex (make-lock-with-logging "web-repl-mutex"))))
-        (submit-command command ctx)))
+      ;; Use the global web repl-context
+      (submit-command command *web-repl-context*))
 
     (send-json-response stream "{\"status\": \"ok\"}")))
 
 (defun handle-history-request (stream)
   "Handle history request."
-  (let* ((history-data (if (boundp '*global-history*) *global-history* '()))
+  (let* ((history-data (if *web-repl-context*
+                           (bt:with-lock-held ((repl-context-mutex *web-repl-context*))
+                             (repl-context-history *web-repl-context*))
+                           '()))
          (json-history (jsown:new-js
                          ("history" (mapcar (lambda (item)
                                               (jsown:new-js
@@ -379,12 +384,6 @@
                                             (reverse history-data))))))
     (send-json-response stream (jsown:to-json json-history))))
 
-(defun add-to-global-history (command result)
-  "Add command and result to global history."
-  (push (make-history-item :command command :result result) *global-history*)
-  ;; Keep only last 100 items
-  (when (> (length *global-history*) 100)
-    (setf *global-history* (subseq *global-history* 0 100))))
 
 (defun send-html-response (stream html)
   "Send HTML response."
