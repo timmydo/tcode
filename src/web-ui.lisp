@@ -148,6 +148,121 @@
     </div>
 
     <script>
+        // DOM Reconciliation Functions (borrowed from TLE)
+        function jsonToDOM(jsonNode) {
+            if (typeof jsonNode === 'string') {
+                // Text node
+                return document.createTextNode(jsonNode);
+            } else if (jsonNode && jsonNode.type === 'element') {
+                // Element node
+                const element = document.createElement(jsonNode.tag);
+
+                // Set attributes
+                if (jsonNode.attributes) {
+                    for (const [key, value] of Object.entries(jsonNode.attributes)) {
+                        element.setAttribute(key, value);
+                    }
+                }
+
+                // Add children
+                if (jsonNode.children) {
+                    for (const child of jsonNode.children) {
+                        element.appendChild(jsonToDOM(child));
+                    }
+                }
+
+                return element;
+            }
+            // Fallback for unknown types
+            return document.createTextNode(String(jsonNode));
+        }
+
+        function updateDOMFromJSON(domParent, jsonNode) {
+            // Clear existing content if JSON represents a single child
+            if (typeof jsonNode === 'string' || (jsonNode && jsonNode.type === 'element')) {
+                // Single node - replace all children
+                while (domParent.firstChild) {
+                    domParent.removeChild(domParent.firstChild);
+                }
+                domParent.appendChild(jsonToDOM(jsonNode));
+            } else if (Array.isArray(jsonNode)) {
+                // Array of nodes - reconcile children
+                reconcileChildren(domParent, jsonNode);
+            }
+        }
+
+        function reconcileChildren(domParent, newChildrenJSON) {
+            const currentChildren = Array.from(domParent.childNodes);
+
+            // Reconcile each position
+            for (let i = 0; i < Math.max(currentChildren.length, newChildrenJSON.length); i++) {
+                const currentChild = currentChildren[i];
+                const newChildJSON = newChildrenJSON[i];
+
+                if (!newChildJSON) {
+                    // Remove extra existing children
+                    if (currentChild) {
+                        domParent.removeChild(currentChild);
+                    }
+                } else if (!currentChild) {
+                    // Add new child
+                    domParent.appendChild(jsonToDOM(newChildJSON));
+                } else {
+                    // Reconcile existing child
+                    if (!nodesEqual(currentChild, newChildJSON)) {
+                        // Replace if they're different
+                        const newChild = jsonToDOM(newChildJSON);
+                        domParent.replaceChild(newChild, currentChild);
+                    } else if (currentChild.nodeType === Node.ELEMENT_NODE && newChildJSON.type === 'element') {
+                        // Recursively reconcile element children
+                        reconcileElement(currentChild, newChildJSON);
+                    }
+                }
+            }
+        }
+
+        function reconcileElement(domElement, jsonElement) {
+            // Update attributes
+            const currentAttrs = new Set();
+            for (const attr of domElement.attributes) {
+                currentAttrs.add(attr.name);
+                if (jsonElement.attributes[attr.name] !== attr.value) {
+                    domElement.setAttribute(attr.name, jsonElement.attributes[attr.name] || '');
+                }
+            }
+
+            // Add new attributes
+            if (jsonElement.attributes) {
+                for (const [key, value] of Object.entries(jsonElement.attributes)) {
+                    if (!currentAttrs.has(key)) {
+                        domElement.setAttribute(key, value);
+                    }
+                }
+            }
+
+            // Remove old attributes not in new
+            for (const attr of Array.from(domElement.attributes)) {
+                if (!jsonElement.attributes || !(attr.name in jsonElement.attributes)) {
+                    domElement.removeAttribute(attr.name);
+                }
+            }
+
+            // Reconcile children
+            if (jsonElement.children) {
+                reconcileChildren(domElement, jsonElement.children);
+            }
+        }
+
+        function nodesEqual(domNode, jsonNode) {
+            if (domNode.nodeType === Node.TEXT_NODE) {
+                return typeof jsonNode === 'string' && domNode.textContent === jsonNode;
+            } else if (domNode.nodeType === Node.ELEMENT_NODE) {
+                return jsonNode && jsonNode.type === 'element' &&
+                       domNode.tagName.toLowerCase() === jsonNode.tag;
+            }
+            return false;
+        }
+
         let commandHistory = [];
         let historyIndex = 0;
         let originalInput = '';
@@ -235,14 +350,29 @@
             fetch('/history')
             .then(response => response.json())
             .then(data => {
-                displayHistory(data.history);
+                if (data.type === 'history-update') {
+                    displayHistory(data.content);
+                } else {
+                    // Fallback for old format
+                    displayHistoryOld(data.history);
+                }
             })
             .catch(error => {
                 console.error('Error fetching history:', error);
             });
         }
 
-        function displayHistory(history) {
+        function displayHistory(historyDOM) {
+            // Use DOM reconciliation instead of innerHTML replacement
+            updateDOMFromJSON(historyContainer, historyDOM);
+
+            // Scroll to bottom
+            const contentArea = document.getElementById('content-area');
+            contentArea.scrollTop = contentArea.scrollHeight;
+        }
+
+        function displayHistoryOld(history) {
+            // Fallback for old format
             historyContainer.innerHTML = '';
             history.forEach(item => {
                 const historyItem = document.createElement('div');
@@ -370,19 +500,31 @@
 
     (send-json-response stream "{\"status\": \"ok\"}")))
 
-(defun handle-history-request (stream)
-  "Handle history request."
+(defun render-history-as-dom ()
+  "Render history as DOM structure."
   (let* ((history-data (if *web-repl-context*
                            (bt:with-lock-held ((repl-context-mutex *web-repl-context*))
                              (repl-context-history *web-repl-context*))
                            '()))
-         (json-history (jsown:new-js
-                         ("history" (mapcar (lambda (item)
-                                              (jsown:new-js
-                                                ("command" (history-item-command item))
-                                                ("result" (format nil "~A" (history-item-result item)))))
-                                            (reverse history-data))))))
-    (send-json-response stream (jsown:to-json json-history))))
+         (history-items (mapcar (lambda (item)
+                                  (div :class "history-item"
+                                       :children (list
+                                                  (div :class "command-line"
+                                                       :children (list (text (format nil "tcode> ~A" (history-item-command item)))))
+                                                  (when (history-item-result item)
+                                                    (div :class (if (search "Error" (format nil "~A" (history-item-result item)))
+                                                                    "result-line error-line"
+                                                                    "result-line")
+                                                         :children (list (text (format nil "~A" (history-item-result item)))))))))
+                                (reverse history-data))))
+    (div :children history-items)))
+
+(defun handle-history-request (stream)
+  "Handle history request with DOM reconciliation."
+  (let* ((history-dom (render-history-as-dom))
+         (json-dom (dom-to-json history-dom))
+         (response (jsown:new-js ("type" "history-update") ("content" json-dom))))
+    (send-json-response stream (jsown:to-json response))))
 
 
 (defun send-html-response (stream html)

@@ -13,6 +13,7 @@
                (:file "config")
                (:file "logs")
                (:file "locks")
+               (:file "dom")
                (:file "eval")
                (:file "web-ui")
 	       ;; entry point
