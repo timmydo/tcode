@@ -308,18 +308,24 @@
             (let* ((request-line (read-line stream))
                    (parts (split-string request-line #\Space))
                    (method (first parts))
-                   (path (second parts)))
+                   (path (second parts))
+                   (headers (make-hash-table :test 'equal)))
 
               ;; Read headers
               (loop for line = (read-line stream nil)
-                    until (or (null line) (string= line "") (string= line (string #\Return))))
+                    until (or (null line) (string= line "") (string= line (string #\Return)))
+                    do (let ((colon-pos (position #\: line)))
+                         (when colon-pos
+                           (let ((header-name (string-trim " " (subseq line 0 colon-pos)))
+                                 (header-value (string-trim " " (subseq line (1+ colon-pos)))))
+                             (setf (gethash (string-upcase header-name) headers) header-value)))))
 
               (cond
                 ((and (string= method "GET") (string= path "/"))
                  (send-html-response stream *html-template*))
 
                 ((and (string= method "POST") (string= path "/command"))
-                 (handle-command-request stream ui))
+                 (handle-command-request stream ui headers))
 
                 ((and (string= method "GET") (string= path "/history"))
                  (handle-history-request stream))
@@ -336,10 +342,11 @@
 
       (ignore-errors (usocket:socket-close client-socket)))))
 
-(defun handle-command-request (stream ui)
+(defun handle-command-request (stream ui headers)
   "Handle command submission."
   (declare (ignore ui))
-  (let* ((content-length (or (parse-integer (or (read-header "Content-Length" stream) "0") :junk-allowed t) 0))
+  (log-info "handle-command-request")
+  (let* ((content-length (or (parse-integer (or (gethash "CONTENT-LENGTH" headers) "0") :junk-allowed t) 0))
          (body (make-string content-length))
          (json-data nil)
          (command nil))
@@ -350,7 +357,7 @@
       (setf command (jsown:val json-data "command")))
 
     (unless command
-      (log-info "Command not found: ~A" json-data))
+      (log-info "Command not found: ~A" body))
     
     (when command
       ;; Log the submitted command
@@ -417,10 +424,6 @@
     (write-string body stream)
     (force-output stream)))
 
-(defun read-header (name stream)
-  "Read a specific header from the stream."
-  (declare (ignore name stream))
-  nil)
 
 (defun run-webview (&key title url width height)
   "Launch a webview window pointing to the given URL."

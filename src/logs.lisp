@@ -58,12 +58,17 @@
 
 (defun write-log-entry (level message)
   "Write a log entry with timestamp and level"
-  (when (and *log-stream* (not *logging-disabled*))
-    (format *log-stream* "[~A] ~A: ~A~%"
-            (format-log-timestamp)
-            level
-            message)
-    (finish-output *log-stream*)))
+  (let ((formatted-message (format nil "[~A] ~A: ~A"
+                                   (format-log-timestamp)
+                                   level
+                                   message)))
+    ;; Write to stdout
+    (format t "~A~%" formatted-message)
+    (finish-output t)
+    ;; Write to log file
+    (when (and *log-stream* (not *logging-disabled*))
+      (format *log-stream* "~A~%" formatted-message)
+      (finish-output *log-stream*))))
 
 (defun log-debug (message &rest args)
   "Log a debug message"
@@ -83,14 +88,8 @@
 
 (defun log-command (command)
   "Log a user command"
-  (let ((message (format nil "Command executed: ~A" command)))
-    (format t "~A~%" message)
-    (finish-output t)
-    (log-info "~A" message)))
+  (log-info "Command executed: ~A" command))
 
 (defun log-result (result)
   "Log a command result"
-  (let ((message (format nil "Command result: ~A" result)))
-    (format t "~A~%" message)
-    (finish-output t)
-    (log-debug "~A" message)))
+  (log-debug "Command result: ~A" result))
