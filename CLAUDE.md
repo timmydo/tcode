@@ -28,54 +28,90 @@ tcode is a terminal-based CLI for coding
   - **Usage**: `util/paren-checker.lisp filename.lisp`
 
 ### Dependencies
-- **jsown**: JSON parsing library
+- **jsown**: JSON parsing library for backend API communication
 - **bordeaux-threads**: Threading library for concurrent operations
 - **cffi**: Common Foreign Function Interface
+- **drakma**: HTTP client library for backend API requests
+- **flexi-streams**: Flexible stream handling
+- **webview**: Native webview window creation
+- **usocket**: Socket programming library for web server
+- **babel**: Character encoding/decoding library
 - Uses ASDF to load dependencies from vendor/
 - Do not use quicklisp
 
 ## Architecture
 
-tcode is a terminal-based CLI application written in Common Lisp that provides an interactive REPL environment with curses-like terminal control and PTY management.
+tcode is a webview-based CLI application written in Common Lisp that provides an interactive REPL environment through a web browser interface with backend AI integration.
 
 ### Core Components
 
 #### Entry Point (`src/main.lisp`)
-- **Main function**: Entry point that initializes the terminal interface and starts the REPL loop
-- **Terminal management**: Sets up raw mode for direct character input and curses-like screen control
-- **REPL context**: Manages user input, command history, cursor positioning, and scrollable content display
-- **Screen layout**: Fixed prompt at bottom with scrollable history area above, plus status line
+- **Main function**: Entry point that initializes logging, loads configuration, and starts the webview application
+- **Web server startup**: Creates and launches a web server in a background thread
+- **Webview integration**: Uses webview library to create a native window displaying the web interface
+- **Port management**: Automatically finds available ports or uses TCODE_PORT environment variable
+- **Graceful exit**: Handles application shutdown when webview closes
 
-#### PTY Interface (`src/pty.lisp`)
-- **Low-level terminal control**: CFFI bindings for POSIX PTY operations, terminal attributes, and process management
-- **Raw mode support**: Enables character-by-character input without line buffering
-- **Terminal I/O**: Cursor movement, screen clearing, color management, and escape sequence handling
-- **Window size detection**: Gets terminal dimensions for proper layout
+#### Web User Interface (`src/web-ui.lisp`)
+- **HTTP server**: Custom web server using usocket for handling client connections
+- **HTML template**: Terminal-styled web interface with command input and scrollable history
+- **Real-time updates**: Server-Sent Events (SSE) for streaming command results to browser
+- **DOM reconciliation**: Client-side JavaScript for efficient UI updates without full page reloads
+- **REST endpoints**: `/command` for command submission, `/history` for history retrieval, `/quit` for application exit
 
 #### Command Processing (`src/eval.lisp`)
-- **Command evaluation**: Safely evaluates Lisp expressions with error handling
-- **Special commands**: `/add`, `/rmdir` for directory context management, `/clear` for history, `/config` for configuration
-- **History management**: Maintains command history with results in the REPL context
+- **Command evaluation**: Processes user commands and special tcode commands
+- **Special commands**: `/add`, `/rmdir` for directory context management, `/clear` for history, `/config` for configuration, `/lorem` for test data
+- **History management**: Thread-safe history management with mutex locks
+- **Backend integration**: Routes non-special commands to configured AI backend
+
+#### Data Structures (`src/struct.lisp`)
+- **History items**: Stores command, result, and usage data for each interaction
+- **REPL context**: Manages application state including history, directories, and threading context
+- **Thread safety**: Mutex support for concurrent access to shared state
+
+#### Backend Integration (`src/backend.lisp`)
+- **Abstract backend interface**: Base class for different AI backend connections
+- **OpenRouter implementation**: HTTP streaming client for OpenRouter API with conversation context
+- **Streaming responses**: Real-time response processing with incremental UI updates
+- **Usage tracking**: Captures and displays token usage and cost information
+- **Background processing**: Non-blocking command execution using threads
 
 #### Configuration System (`src/config.lisp`)
 - **Config file management**: Creates and loads `~/.tcode/config.lisp` with user customizations
 - **Backend setup**: Configures API connections (currently OpenRouter for AI integration)
 - **Template system**: Provides default configuration template with examples
+- **Directory management**: Handles ~/.tcode directory creation and file initialization
 
-#### Backend Integration (`src/backend.lisp`)
-- **Abstract backend interface**: Base class for different backend connections
-- **OpenRouter implementation**: Concrete implementation for OpenRouter API integration
-- **Extensible design**: Allows for additional backend types
+#### Logging System (`src/logs.lisp`)
+- **Structured logging**: Timestamped log entries with different severity levels
+- **File and console output**: Logs to both stdout and timestamped log files
+- **Configurable logging**: Can be disabled via TCODE_NO_LOGS environment variable
+- **Session tracking**: Logs application lifecycle and command execution
+
+#### Threading Utilities (`src/locks.lisp`)
+- **Lock management**: Wrapper functions for creating and managing mutex locks
+- **Thread utilities**: Helper functions for thread creation and management with logging
+- **Consistent naming**: Centralized thread naming and lifecycle management
+
+#### DOM Generation (`src/dom.lisp`)
+- **Virtual DOM**: Lisp-based DOM generation for HTML content
+- **JSON serialization**: Converts DOM structures to JSON for client-side rendering
+- **HTML escaping**: Safe text rendering with proper character escaping
+- **Helper functions**: Convenient functions for creating common HTML elements
 
 #### Package Definition (`src/tcode-package.lisp`)
 - **Namespace management**: Defines the `:tcode` package with exported symbols
-- **Public API**: Exposes main entry points and backend connection classes
+- **Public API**: Exposes main entry points, backend classes, and utility functions
+- **Dependency management**: Local nicknames for external libraries
 
 ### Key Features
 
-- **Interactive REPL**: Full Common Lisp evaluation with persistent history
-- **Terminal UI**: Curses-like interface with fixed prompt and scrollable content
-- **Keyboard navigation**: Arrow keys, page up/down, home/end, and standard editing shortcuts
+- **Webview interface**: Native application window with web-based UI
+- **Real-time streaming**: Live command results via Server-Sent Events
+- **AI integration**: Pluggable backend system for different AI providers
+- **Conversation context**: Maintains full conversation history for AI interactions
 - **Directory context**: Track multiple directory contexts for file operations
-- **Configurable backends**: Pluggable backend system for AI integration
-- **Error handling**: Robust error handling throughout the stack
+- **Thread-safe operations**: Concurrent command processing with proper synchronization
+- **Usage analytics**: Token usage and cost tracking for AI interactions
+- **Comprehensive logging**: Detailed logging system for debugging and monitoring
