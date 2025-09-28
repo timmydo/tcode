@@ -42,6 +42,10 @@
               ;; Thread-safe update to history item
               (bt:with-lock-held ((repl-context-mutex repl-context))
                 (setf (history-item-result history-item) new-accumulated))
+              ;; Broadcast incremental update to web clients (only if non-empty)
+              (when (and (boundp '*sse-clients*)
+                         (> (length new-accumulated) 0))
+                (broadcast-incremental-update (history-item-command history-item) new-accumulated))
               new-accumulated)
             accumulated-response))
     (error (parse-err)
@@ -126,6 +130,9 @@
       (bt:with-lock-held ((repl-context-mutex repl-context))
 	(push history-item (repl-context-history repl-context)))
 
+      ;; Send initial history update to web clients before streaming
+      (when (boundp '*sse-clients*)
+        (broadcast-history-update))
 
       ;; Store stream for cancellation
       (setf (repl-context-current-stream repl-context) stream)

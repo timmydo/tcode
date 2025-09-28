@@ -8,6 +8,7 @@
 (defvar *web-ui-instance* nil)
 (defvar *server-running* nil)
 (defvar *web-repl-context* nil)
+(defvar *sse-clients* nil)
 
 (defun quit-tcode ()
   "Quit tcode without prompting."
@@ -338,27 +339,11 @@
             .then(response => response.json())
             .then(data => {
                 statusArea.textContent = '';
-                updateHistory();
+                // History will be updated via SSE
             })
             .catch(error => {
                 console.error('Error:', error);
                 statusArea.textContent = 'Error: ' + error.message;
-            });
-        }
-
-        function updateHistory() {
-            fetch('/history')
-            .then(response => response.json())
-            .then(data => {
-                if (data.type === 'history-update') {
-                    displayHistory(data.content);
-                } else {
-                    // Fallback for old format
-                    displayHistoryOld(data.history);
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching history:', error);
             });
         }
 
@@ -375,35 +360,73 @@
             }
         }
 
-        function displayHistoryOld(history) {
-            // Fallback for old format
-            historyContainer.innerHTML = '';
-            history.forEach(item => {
-                const historyItem = document.createElement('div');
-                historyItem.className = 'history-item';
+        function updateLastHistoryEntry(command, result) {
+            const contentArea = document.getElementById('content-area');
+            const wasAtBottom = contentArea.scrollTop >= contentArea.scrollHeight - contentArea.clientHeight - 10;
 
-                const commandLine = document.createElement('div');
-                commandLine.className = 'command-line';
-                commandLine.textContent = 'tcode> ' + item.command;
-                historyItem.appendChild(commandLine);
+            // Find the last history item by looking for the last element with class 'history-item'
+            const historyItems = historyContainer.getElementsByClassName('history-item');
 
-                if (item.result) {
-                    const resultLine = document.createElement('div');
-                    resultLine.className = item.result.includes('Error') ? 'result-line error-line' : 'result-line';
-                    resultLine.textContent = item.result;
-                    historyItem.appendChild(resultLine);
+            console.log('Updating last history entry, found', historyItems.length, 'history items');
+            console.log('Command:', command, 'Result length:', result.length);
+
+            if (historyItems.length > 0) {
+                const lastItem = historyItems[historyItems.length - 1];
+
+                // Find the result line within the last item
+                let resultLine = lastItem.querySelector('.result-line');
+                if (resultLine) {
+                    // Update the result text
+                    resultLine.textContent = result;
+                    // Update class based on content (error detection)
+                    resultLine.className = result.includes('Error') ? 'result-line error-line' : 'result-line';
+                    console.log('Updated existing result line');
+                } else {
+                    // If no result line exists, create one
+                    const newResultLine = document.createElement('div');
+                    newResultLine.className = result.includes('Error') ? 'result-line error-line' : 'result-line';
+                    newResultLine.textContent = result;
+                    lastItem.appendChild(newResultLine);
+                    console.log('Created new result line');
                 }
 
-                historyContainer.appendChild(historyItem);
-            });
-
+                // Only scroll to bottom if user was already at bottom (auto-scroll new content)
+                if (wasAtBottom) {
+                    contentArea.scrollTop = contentArea.scrollHeight;
+                }
+            } else {
+                console.log('No history items found for incremental update');
+            }
         }
 
-        // Initial history load
-        updateHistory();
+        // Set up Server-Sent Events for real-time updates
+        const eventSource = new EventSource('/events');
 
-        // Periodic updates
-        setInterval(updateHistory, 1000);
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('Received SSE message:', data.type);
+                if (data.type === 'history-update') {
+                    console.log('Processing history-update');
+                    displayHistory(data.content);
+                } else if (data.type === 'incremental-update') {
+                    console.log('Processing incremental-update for command:', data.command);
+                    updateLastHistoryEntry(data.command, data.result);
+                }
+            } catch (error) {
+                console.error('Error parsing SSE data:', error);
+            }
+        };
+
+        eventSource.onerror = function(event) {
+            console.error('SSE connection error:', event);
+            // Optionally implement reconnection logic here
+        };
+
+        // Clean up EventSource when page unloads
+        window.addEventListener('beforeunload', function() {
+            eventSource.close();
+        });
     </script>
 </body>
 </html>")
@@ -464,6 +487,9 @@
                 ((and (string= method "GET") (string= path "/history"))
                  (handle-history-request stream))
 
+                ((and (string= method "GET") (string= path "/events"))
+                 (handle-sse-request stream))
+
                 ((and (string= method "POST") (string= path "/quit"))
                  (send-json-response stream "{\"status\": \"ok\"}")
                  (quit-tcode))
@@ -497,7 +523,9 @@
       ;; Log the submitted command
       (log-command command)
       ;; Use the global web repl-context
-      (submit-command command *web-repl-context*))
+      (submit-command command *web-repl-context*)
+      ;; Broadcast history update to all SSE clients
+      (broadcast-history-update))
 
     (send-json-response stream "{\"status\": \"ok\"}")))
 
@@ -527,6 +555,82 @@
          (response (jsown:new-js ("type" "history-update") ("content" json-dom))))
     (send-json-response stream (jsown:to-json response))))
 
+(defun handle-sse-request (stream)
+  "Handle Server-Sent Events connection."
+  (format stream "HTTP/1.1 200 OK~C~C" #\Return #\Newline)
+  (format stream "Content-Type: text/event-stream~C~C" #\Return #\Newline)
+  (format stream "Cache-Control: no-cache~C~C" #\Return #\Newline)
+  (format stream "Connection: keep-alive~C~C" #\Return #\Newline)
+  (format stream "Access-Control-Allow-Origin: *~C~C" #\Return #\Newline)
+  (format stream "~C~C" #\Return #\Newline)
+  (force-output stream)
+
+  ;; Add this stream to the list of SSE clients
+  (push stream *sse-clients*)
+
+  ;; Send initial history to the new client
+  (send-sse-history-update stream)
+
+  ;; Keep the connection open by handling client disconnect
+  (handler-case
+      (loop
+        ;; Send a keep-alive comment every 30 seconds
+        (sleep 30)
+        (format stream ": keep-alive~C~C" #\Return #\Newline)
+        (force-output stream))
+    (error ()
+      ;; Client disconnected, remove from list
+      (setf *sse-clients* (remove stream *sse-clients*)))))
+
+(defun send-sse-history-update (stream)
+  "Send history update to a specific SSE client."
+  (handler-case
+      (let* ((history-dom (render-history-as-dom))
+             (json-dom (dom-to-json history-dom))
+             (data (jsown:to-json (jsown:new-js ("type" "history-update") ("content" json-dom)))))
+        (format stream "data: ~A~C~C~C~C" data #\Return #\Newline #\Return #\Newline)
+        (force-output stream))
+    (error ()
+      ;; Client disconnected, remove from list
+      (setf *sse-clients* (remove stream *sse-clients*)))))
+
+(defun broadcast-history-update ()
+  "Broadcast history update to all connected SSE clients."
+  (let ((disconnected-clients '()))
+    (dolist (client *sse-clients*)
+      (handler-case
+          (send-sse-history-update client)
+        (error ()
+          ;; Mark client as disconnected
+          (push client disconnected-clients))))
+    ;; Remove disconnected clients
+    (dolist (client disconnected-clients)
+      (setf *sse-clients* (remove client *sse-clients*)))))
+
+(defun send-sse-incremental-update (stream command result)
+  "Send incremental update for the last history entry to a specific SSE client."
+  (handler-case
+      (let* ((data (jsown:to-json (jsown:new-js ("type" "incremental-update")
+                                                ("command" command)
+                                                ("result" result)))))
+        (format stream "data: ~A~C~C~C~C" data #\Return #\Newline #\Return #\Newline)
+        (force-output stream))
+    (error ()
+      ;; Client disconnected, remove from list
+      (setf *sse-clients* (remove stream *sse-clients*)))))
+
+(defun broadcast-incremental-update (command result)
+  "Broadcast incremental update for the last history entry to all connected SSE clients."
+  (let ((disconnected-clients '()))
+    (dolist (client *sse-clients*)
+      (handler-case
+          (send-sse-incremental-update client command result)
+        (error ()
+          ;; Mark client as disconnected
+          (push client disconnected-clients))))
+    ;; Remove disconnected clients
+    (dolist (client disconnected-clients)
+      (setf *sse-clients* (remove client *sse-clients*)))))
 
 (defun send-html-response (stream html)
   "Send HTML response."
