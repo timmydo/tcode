@@ -122,7 +122,8 @@
                                       :content payload
                                       :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
                                                            ("Content-Type" . "application/json"))
-                                      :want-stream t)))
+                                      :want-stream t
+                                      :external-format-in :utf-8)))
 
       (log-debug "HTTP request initiated, processing streaming response")
 
