@@ -4,7 +4,8 @@
 
 (defstruct history-item
   (command "")
-  (result nil))
+  (result nil)
+  (usage nil))
 
 (defstruct repl-context
   (history '())

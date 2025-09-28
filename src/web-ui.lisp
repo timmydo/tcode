@@ -529,6 +529,17 @@
 
     (send-json-response stream "{\"status\": \"ok\"}")))
 
+(defun format-usage-info (usage)
+  "Format usage information for display"
+  (when usage
+    (let ((prompt-tokens (jsown:val usage "prompt_tokens"))
+          (completion-tokens (jsown:val usage "completion_tokens"))
+          (total-tokens (jsown:val usage "total_tokens")))
+      (format nil "~A/~A tokens (~A total)"
+              (or prompt-tokens "?")
+              (or completion-tokens "?")
+              (or total-tokens "?")))))
+
 (defun render-history-as-dom ()
   "Render history as DOM structure."
   (let* ((history-data (if *web-repl-context*
@@ -537,14 +548,21 @@
                            '()))
          (history-items (mapcar (lambda (item)
                                   (div :class "history-item"
-                                       :children (list
-                                                  (div :class "command-line"
-                                                       :children (list (text (format nil "tcode> ~A" (history-item-command item)))))
+                                       :children (append
+                                                  (list
+                                                   (div :class "command-line"
+                                                        :children (list (text (format nil "tcode> ~A" (history-item-command item))))))
                                                   (when (history-item-result item)
-                                                    (div :class (if (search "Error" (format nil "~A" (history-item-result item)))
-                                                                    "result-line error-line"
-                                                                    "result-line")
-                                                         :children (list (text (format nil "~A" (history-item-result item)))))))))
+                                                    (list
+                                                     (div :class (if (search "Error" (format nil "~A" (history-item-result item)))
+                                                                     "result-line error-line"
+                                                                     "result-line")
+                                                          :children (list (text (format nil "~A" (history-item-result item)))))))
+                                                  (when (history-item-usage item)
+                                                    (list
+                                                     (div :class "usage-line"
+                                                          :style "text-align: right; color: #666; font-size: 0.8em; margin-top: 4px;"
+                                                          :children (list (text (format-usage-info (history-item-usage item))))))))))
                                 (reverse history-data))))
     (div :children history-items)))
 

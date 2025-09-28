@@ -34,7 +34,17 @@
              (choices (jsown:val parsed "choices"))
              (first-choice (if (vectorp choices) (aref choices 0) (first choices)))
              (delta (jsown:val first-choice "delta"))
-             (content (jsown:val delta "content")))
+             (content (jsown:val delta "content"))
+             (usage (ignore-errors (jsown:val parsed "usage"))))
+
+        ;; Capture usage data if present (typically in final chunk)
+        (when usage
+          (bt:with-lock-held ((repl-context-mutex repl-context))
+            (setf (history-item-usage history-item) usage)
+            (log-debug "Captured usage data: ~A" usage))
+          ;; Broadcast full history update when usage data is received
+          (when (boundp '*sse-clients*)
+            (broadcast-history-update)))
 
         (if content
             (let ((new-accumulated (concatenate 'string accumulated-response content)))
@@ -50,7 +60,7 @@
             accumulated-response))
     (error (parse-err)
       ;; Continue processing even if one chunk fails
-      (declare (ignore parse-err))
+      (log-debug "Error processing chunk: ~A" parse-err)
       accumulated-response)))
 
 (defun read-streaming-response (stream repl-context history-item)
@@ -73,7 +83,7 @@
                       (if (string= json-data "[DONE]")
                           (return accumulated-response)
 
-                          ;; Parse and process the chunk
+                          ;; Parse and process the chunk, capturing usage data
                           (setf accumulated-response
                                 (process-streaming-chunk json-data accumulated-response repl-context history-item)))))))
       (error (e)
@@ -111,7 +121,8 @@
                    (jsown:new-js
                      ("model" model)
                      ("messages" messages-vector)
-                     ("stream" t)))))
+                     ("stream" t)
+                     ("usage" (jsown:new-js ("include" t)))))))
 
     (log-debug "Sending HTTP request to OpenRouter API with model: ~A" model)
     (log-debug "Payload with ~A messages: ~A" (length messages-vector) payload)
