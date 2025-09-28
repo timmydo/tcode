@@ -534,11 +534,18 @@
   (when usage
     (let ((prompt-tokens (jsown:val usage "prompt_tokens"))
           (completion-tokens (jsown:val usage "completion_tokens"))
-          (total-tokens (jsown:val usage "total_tokens")))
-      (format nil "~A/~A tokens (~A total)"
-              (or prompt-tokens "?")
-              (or completion-tokens "?")
-              (or total-tokens "?")))))
+          (total-tokens (jsown:val usage "total_tokens"))
+          (cost (jsown:val usage "cost")))
+      (if cost
+          (format nil "~A/~A tokens (~A total) - $~,2f"
+                  (or prompt-tokens "?")
+                  (or completion-tokens "?")
+                  (or total-tokens "?")
+                  cost)
+          (format nil "~A/~A tokens (~A total)"
+                  (or prompt-tokens "?")
+                  (or completion-tokens "?")
+                  (or total-tokens "?"))))))
 
 (defun render-history-as-dom ()
   "Render history as DOM structure."
