@@ -165,6 +165,45 @@
                  (push (cons tc-id result) results))))
     (nreverse results)))
 
+(defun continue-with-tool-results (backend input-string repl-context history-item tool-calls accumulated-response)
+  "Execute tool calls and continue the conversation with results"
+  (log-info "Processing ~A tool call(s)" (length tool-calls))
+
+  ;; Execute tools
+  (let ((tool-results (execute-tool-calls tool-calls)))
+
+    ;; Build continuation messages with assistant's tool calls + tool results
+    (let ((continuation-messages '()))
+      ;; Add assistant message with tool calls
+      (push (jsown:new-js
+              ("role" "assistant")
+              ("content" (or accumulated-response ""))
+              ("tool_calls" tool-calls))
+            continuation-messages)
+
+      ;; Add tool result messages
+      (dolist (result-pair tool-results)
+        (push (jsown:new-js
+                ("role" "tool")
+                ("tool_call_id" (car result-pair))
+                ("content" (cdr result-pair)))
+              continuation-messages))
+
+      ;; Update history item with tool call info
+      (bt:with-lock-held ((repl-context-mutex repl-context))
+        (setf (history-item-result history-item)
+              (format nil "~A~%[Executed ~A tool call(s)]"
+                      accumulated-response
+                      (length tool-calls))))
+
+      ;; Broadcast update
+      (when (boundp '*sse-clients*)
+        (broadcast-history-update))
+
+      ;; Call backend with tool results
+      (send-request backend input-string repl-context history-item
+                    (nreverse continuation-messages)))))
+
 (defmethod send-request ((backend openrouter-connection) input-string repl-context history-item &optional additional-messages)
   "Send HTTP request to OpenRouter API and process streaming response.
    If tool calls are made, automatically executes them and continues the conversation."
@@ -249,42 +288,46 @@
         ;; Check if we have tool calls to execute
         (if (and tool-calls (> (length tool-calls) 0) (aref tool-calls 0))
             (progn
-              (log-info "Processing ~A tool call(s)" (length tool-calls))
+              (log-info "Received ~A tool call(s), requesting user approval" (length tool-calls))
 
-              ;; Execute tools
-              (let ((tool-results (execute-tool-calls tool-calls)))
+              ;; Check if auto-approval is enabled
+              (if (repl-context-auto-approve-tools repl-context)
+                  (progn
+                    (log-info "Auto-approval enabled, executing tool calls")
+                    ;; Auto-approve and execute
+                    (continue-with-tool-results backend input-string repl-context history-item
+                                               tool-calls accumulated-response))
 
-                ;; Build continuation messages with assistant's tool calls + tool results
-                (let ((continuation-messages '()))
-                  ;; Add assistant message with tool calls
-                  (push (jsown:new-js
-                          ("role" "assistant")
-                          ("content" (or accumulated-response ""))
-                          ("tool_calls" tool-calls))
-                        continuation-messages)
+                  ;; Request user approval
+                  (progn
+                    ;; Format tool calls for display
+                    (let ((tool-call-summary
+                           (with-output-to-string (s)
+                             (format s "~A~%~%The assistant wants to use the following tool~:P:~%~%"
+                                     (or accumulated-response ""))
+                             (loop for tc across tool-calls
+                                   for i from 1
+                                   when tc
+                                   do (let* ((tc-function (jsown:val tc "function"))
+                                            (func-name (jsown:val tc-function "name"))
+                                            (func-args-json (jsown:val tc-function "arguments")))
+                                        (format s "~A. ~A~%   Arguments: ~A~%~%"
+                                               i func-name func-args-json)))
+                             (format s "Approve? (yes/no/auto)"))))
 
-                  ;; Add tool result messages
-                  (dolist (result-pair tool-results)
-                    (push (jsown:new-js
-                            ("role" "tool")
-                            ("tool_call_id" (car result-pair))
-                            ("content" (cdr result-pair)))
-                          continuation-messages))
+                      ;; Store pending tool calls and context for approval
+                      (bt:with-lock-held ((repl-context-mutex repl-context))
+                        (setf (repl-context-pending-tool-calls repl-context) tool-calls)
+                        (setf (repl-context-pending-accumulated-response repl-context) accumulated-response)
+                        (setf (repl-context-pending-backend repl-context) backend)
+                        (setf (repl-context-pending-input-string repl-context) input-string)
+                        (setf (repl-context-pending-history-item repl-context) history-item)
+                        (setf (repl-context-state repl-context) :waiting-for-tool-approval)
+                        (setf (history-item-result history-item) tool-call-summary))
 
-                  ;; Update history item with tool call info
-                  (bt:with-lock-held ((repl-context-mutex repl-context))
-                    (setf (history-item-result history-item)
-                          (format nil "~A~%[Executed ~A tool call(s)]"
-                                  accumulated-response
-                                  (length tool-calls))))
-
-                  ;; Broadcast update
-                  (when (boundp '*sse-clients*)
-                    (broadcast-history-update))
-
-                  ;; Recursively call backend with tool results
-                  (send-request backend input-string repl-context history-item
-                                (nreverse continuation-messages)))))
+                      ;; Broadcast update
+                      (when (boundp '*sse-clients*)
+                        (broadcast-history-update))))))
 
             ;; No tool calls - final result update
             (progn
@@ -314,9 +357,10 @@
                                   (format nil "Backend error: ~A" e))
                             (log-error "Backend error: ~A" e))))
 
-                      ;; Reset state when done
-                      (setf (repl-context-state repl-context) :normal
-                            (repl-context-current-thread repl-context) nil
+                      ;; Reset state when done (unless waiting for tool approval)
+                      (unless (eq (repl-context-state repl-context) :waiting-for-tool-approval)
+                        (setf (repl-context-state repl-context) :normal))
+                      (setf (repl-context-current-thread repl-context) nil
                             (repl-context-current-stream repl-context) nil))
                     :name "http-request-thread")))
 
