@@ -21,5 +21,14 @@
            #:make-lock-with-logging
            #:make-thread-with-logging
            #:join-thread-with-logging
-           #:thread-name))
+           #:thread-name
+           ;; Tool API
+           #:register-tool
+           #:get-registered-tools
+           #:get-tool
+           #:call-tool
+           #:tools-to-openrouter-format
+           ;; Shell tool
+           #:start-shell
+           #:execute-in-shell))
 
