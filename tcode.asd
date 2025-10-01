@@ -13,6 +13,7 @@
                (:file "locks")
                (:file "tool")
                (:file "shell")
+               (:file "jsonrpc-server")
                (:file "backend")
                (:file "config")
                (:file "dom")

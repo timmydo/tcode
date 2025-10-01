@@ -19,4 +19,5 @@
   (pending-backend nil)  ; Backend for continuing after approval
   (pending-input-string nil)  ; Original input string
   (pending-history-item nil)  ; History item for continuation
-  (auto-approve-tools nil))  ; Auto-approve all tool calls
+  (auto-approve-tools nil)  ; Auto-approve all tool calls
+  (tool-backend nil))  ; JSONRPC backend for tool execution

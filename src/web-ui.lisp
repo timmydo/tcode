@@ -441,7 +441,22 @@
   (setf *server-running* t)
 
   ;; Create a single repl-context for the web UI
-  (setf *web-repl-context* (make-repl-context :mutex (make-lock-with-logging "web-repl-mutex")))
+  (let* ((use-tool-backend (uiop:getenv "TCODE_USE_TOOL_BACKEND"))
+         (tool-backend-port (let ((env-port (uiop:getenv "TCODE_JSONRPC_PORT")))
+                             (if env-port
+                                 (parse-integer env-port :junk-allowed t)
+                                 9876)))
+         (tool-backend (when (and use-tool-backend
+                                 (not (string= use-tool-backend "0"))
+                                 (not (string= use-tool-backend "")))
+                        (make-tool-backend :port tool-backend-port))))
+
+    (when tool-backend
+      (log-info "Using JSONRPC tool backend on port ~A" tool-backend-port))
+
+    (setf *web-repl-context* (make-repl-context
+                               :mutex (make-lock-with-logging "web-repl-mutex")
+                               :tool-backend tool-backend)))
 
   (let ((server-socket (usocket:socket-listen "127.0.0.1" port :reuse-address t :backlog 5)))
     (setf (server-socket ui) server-socket)

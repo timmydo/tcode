@@ -5,11 +5,23 @@
 (defpackage #:tcode
   (:use :cl)
   (:local-nicknames (:bt :bordeaux-threads))
-  (:export #:main
+  (:export ;; Entry points
+           #:main
+           #:client
+           #:server
+           ;; Backend connections
            #:backend-connection
            #:openrouter-connection
            #:make-openrouter-connection
            #:dispatch-command
+           ;; Tool backend
+           #:tool-backend
+           #:make-tool-backend
+           #:call-tool-via-backend
+           ;; JSONRPC server
+           #:start-jsonrpc-server
+           #:stop-jsonrpc-server
+           ;; Logging
            #:initialize-logging
            #:cleanup-logging
            #:log-debug
@@ -18,6 +30,7 @@
            #:log-error
            #:log-command
            #:log-result
+           ;; Threading
            #:make-lock-with-logging
            #:make-thread-with-logging
            #:join-thread-with-logging

@@ -17,9 +17,73 @@
     :documentation "OpenRouter API key"))
   (:documentation "OpenRouter API connection"))
 
+(defclass tool-backend ()
+  ((host
+    :initarg :host
+    :accessor tool-backend-host
+    :initform "127.0.0.1"
+    :documentation "JSONRPC server host")
+   (port
+    :initarg :port
+    :accessor tool-backend-port
+    :initform 9876
+    :documentation "JSONRPC server port"))
+  (:documentation "JSONRPC client for tool execution"))
+
 (defun make-openrouter-connection (api-key)
   "Create a new OpenRouter connection with the given API key"
   (make-instance 'openrouter-connection :api-key api-key))
+
+(defun make-tool-backend (&key (host "127.0.0.1") (port 9876))
+  "Create a new tool backend JSONRPC client"
+  (make-instance 'tool-backend :host host :port port))
+
+(defun call-tool-via-backend (backend tool-name arguments)
+  "Call a tool via the JSONRPC backend. Arguments should be an alist."
+  (handler-case
+      (let* ((host (tool-backend-host backend))
+             (port (tool-backend-port backend))
+             ;; Convert alist to jsown object
+             (args-obj (let ((obj (jsown:new-js)))
+                        (dolist (pair arguments)
+                          (setf (jsown:val obj (car pair)) (cdr pair)))
+                        obj))
+             (request (jsown:to-json
+                       (jsown:new-js
+                         ("jsonrpc" "2.0")
+                         ("method" "executeTool")
+                         ("params" (jsown:new-js
+                                     ("name" tool-name)
+                                     ("arguments" args-obj)))
+                         ("id" 1))))
+             ;; Create socket connection
+             (socket (usocket:socket-connect host port :element-type 'character))
+             (stream (usocket:socket-stream socket)))
+
+        (log-debug "Sending JSONRPC request: ~A" request)
+
+        ;; Send request
+        (write-line request stream)
+        (force-output stream)
+
+        ;; Read response
+        (let* ((response-line (read-line stream nil nil))
+               (response (jsown:parse response-line)))
+
+          (log-debug "Received JSONRPC response: ~A" response-line)
+
+          ;; Close socket
+          (usocket:socket-close socket)
+
+          ;; Check for error
+          (let ((error-obj (ignore-errors (jsown:val response "error"))))
+            (if error-obj
+                (format nil "Tool backend error: ~A"
+                        (jsown:val error-obj "message"))
+                (jsown:val response "result")))))
+
+    (error (e)
+      (format nil "Tool backend connection error: ~A" e))))
 
 (defgeneric dispatch-command (backend input-string repl-context)
   (:documentation "Dispatch a command to the backend, create history item, and stream the response"))
@@ -91,7 +155,7 @@
 
         (if content
             (let ((new-accumulated (concatenate 'string accumulated-response content)))
-	      (log-debug "New content: '~A'" content)
+	      ;; (log-debug "New content: '~A'" content)
               ;; Thread-safe update to history item
               (bt:with-lock-held ((repl-context-mutex repl-context))
                 (setf (history-item-result history-item) new-accumulated))
@@ -122,7 +186,7 @@
                     (let ((json-data (subseq line 6))) ; Remove "data: " prefix
 
                       ;; Log the actual JSON response data
-                      (log-debug "Raw JSON chunk: ~A" json-data)
+                      ;; (log-debug "Raw JSON chunk: ~A" json-data)
 
                       ;; Check for end of stream
                       (if (string= json-data "[DONE]")
@@ -139,9 +203,11 @@
           (log-error "Stream processing error: ~A" e))))
     (values accumulated-response tool-calls-acc)))
 
-(defun execute-tool-calls (tool-calls)
-  "Execute tool calls and return results as a list of (tool-call-id . result-string) pairs"
-  (let ((results '()))
+(defun execute-tool-calls (tool-calls repl-context)
+  "Execute tool calls and return results as a list of (tool-call-id . result-string) pairs.
+   If tool-backend is set in repl-context, uses JSONRPC; otherwise calls tools locally."
+  (let ((results '())
+        (backend (repl-context-tool-backend repl-context)))
     (loop for tc across tool-calls
           when tc
           do (let* ((tc-id (jsown:val tc "id"))
@@ -160,7 +226,10 @@
                                      (jsown:do-json-keys (key val) func-args
                                        (push (cons key val) alist))
                                      alist)))
-                      (result (call-tool func-name args-alist)))
+                      ;; Use backend if available, otherwise local call
+                      (result (if backend
+                                  (call-tool-via-backend backend func-name args-alist)
+                                  (call-tool func-name args-alist))))
                  (log-info "Tool ~A result: ~A" func-name result)
                  (push (cons tc-id result) results))))
     (nreverse results)))
@@ -169,8 +238,8 @@
   "Execute tool calls and continue the conversation with results"
   (log-info "Processing ~A tool call(s)" (length tool-calls))
 
-  ;; Execute tools
-  (let ((tool-results (execute-tool-calls tool-calls)))
+  ;; Execute tools (now passing repl-context for tool-backend access)
+  (let ((tool-results (execute-tool-calls tool-calls repl-context)))
 
     ;; Build continuation messages with assistant's tool calls + tool results
     (let ((continuation-messages '()))
