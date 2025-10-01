@@ -1,0 +1,12 @@
+{
+  "name": "tcode Development Container",
+  "image": "fukamachi/sbcl:latest-alpine",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "commonlispbr.commonlisp"
+      ]
+    }
+  },
+  "postCreateCommand": "sbcl --version"
+}
