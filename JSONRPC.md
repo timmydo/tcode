@@ -1,15 +1,44 @@
 # JSONRPC Tool Backend
 
-The tcode application has been refactored to support a client-server architecture where tool execution can be delegated to a separate JSONRPC server.
+The tcode application uses a client-server architecture where tool execution is delegated to a JSONRPC server.
 
 ## Architecture
 
-- **Client** (`tcode:client`): Webview-based UI that communicates with AI backends and optionally delegates tool execution to a JSONRPC server
+- **Client** (`tcode:client`): Webview-based UI that communicates with AI backends and delegates tool execution to a JSONRPC server
 - **Server** (`tcode:server`): JSONRPC server that executes registered tools
 
-## Running the Server
+The client automatically starts the JSONRPC server in a background thread, so you only need to run the client.
 
-Start the JSONRPC tool server:
+## Running the Client
+
+Simply run the client script:
+
+```bash
+./client.sh
+```
+
+Or use the legacy start.sh:
+
+```bash
+./start.sh
+```
+
+The client will:
+1. Start a JSONRPC server on port 9876 (or `$TCODE_JSONRPC_PORT`)
+2. Connect to it for tool execution
+3. Start the webview interface
+
+### Custom JSONRPC Port
+
+To use a different port for the JSONRPC server:
+
+```bash
+TCODE_JSONRPC_PORT=9999 ./client.sh
+```
+
+## Running the Server Standalone
+
+If you want to run the JSONRPC server separately (for debugging or remote access):
 
 ```bash
 ./server.sh
@@ -25,30 +54,6 @@ Or directly from Lisp:
 
 ```lisp
 (tcode:server :port 9876)
-```
-
-## Running the Client
-
-### Standalone Mode (Default)
-
-The client can run in standalone mode without a JSONRPC server. Tools are executed locally:
-
-```bash
-./client.sh
-```
-
-### Client-Server Mode
-
-To use the JSONRPC tool backend, set the `TCODE_USE_TOOL_BACKEND` environment variable:
-
-```bash
-TCODE_USE_TOOL_BACKEND=1 ./client.sh
-```
-
-With a custom JSONRPC port:
-
-```bash
-TCODE_USE_TOOL_BACKEND=1 TCODE_JSONRPC_PORT=9999 ./client.sh
 ```
 
 ## JSONRPC Protocol
@@ -111,13 +116,44 @@ Execute a tool with given arguments.
 }
 ```
 
+## Logging
+
+The client and server maintain separate log files:
+
+- **Client logs**: `~/.tcode/logs/tcode-client-TIMESTAMP.log`
+- **Server logs**: `~/.tcode/logs/tcode-server-TIMESTAMP.log`
+
+To view logs:
+
+```bash
+# View most recent client log
+./log.sh client
+
+# View most recent server log
+./log.sh server
+
+# View most recent log of either type
+./log.sh
+```
+
+## Tool Execution Flow
+
+1. User sends command to client
+2. Client forwards to AI backend (e.g., OpenRouter)
+3. AI backend responds with tool calls
+4. Client automatically sends tool calls to JSONRPC server
+5. JSONRPC server executes tools and returns results
+6. Client sends results back to AI backend for continuation
+7. AI backend provides final response to user
+
+Tool calls are auto-executed - no approval required.
+
 ## Implementation Details
 
 - The client stores the JSONRPC backend in the `repl-context` under the `tool-backend` slot
-- When tools are called, the `execute-tool-calls` function checks if a `tool-backend` is set
-- If set, tool calls are sent to the JSONRPC server via `call-tool-via-backend`
-- Otherwise, tools are executed locally via `call-tool`
+- All tool calls are sent to the JSONRPC server via `call-tool-via-backend`
 - Communication uses line-delimited JSON over TCP sockets
+- The server runs in a background thread started by the client
 
 ## Legacy Support
 

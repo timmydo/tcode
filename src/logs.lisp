@@ -9,6 +9,9 @@
 (defvar *logging-disabled* nil
   "Cached value of whether logging is disabled via environment variable")
 
+(defvar *log-type* nil
+  "Type of log: 'client' or 'server'")
+
 (defun get-logs-directory ()
   "Get the tcode logs directory path"
   (merge-pathnames "logs/" (get-config-directory)))
@@ -23,11 +26,16 @@
   "Generate a timestamped log filename"
   (multiple-value-bind (sec min hour date month year)
       (get-decoded-time)
-    (format nil "tcode-~4,'0d~2,'0d~2,'0d-~2,'0d~2,'0d~2,'0d.log"
-            year month date hour min sec)))
+    (let ((type-prefix (if *log-type*
+                          (format nil "~A-" *log-type*)
+                          "")))
+      (format nil "tcode-~A~4,'0d~2,'0d~2,'0d-~2,'0d~2,'0d~2,'0d.log"
+              type-prefix year month date hour min sec))))
 
-(defun initialize-logging ()
-  "Initialize logging system - creates logs directory and opens log file"
+(defun initialize-logging (&key (type nil))
+  "Initialize logging system - creates logs directory and opens log file.
+   TYPE can be 'client' or 'server' to distinguish log files."
+  (setf *log-type* type)
   (setf *logging-disabled* (string= (or (sb-ext:posix-getenv "TCODE_NO_LOGS") "") "1"))
   (unless *logging-disabled*
     (ensure-logs-directory)
@@ -38,7 +46,7 @@
                                :if-exists :append
                                :if-does-not-exist :create))
       (when *log-stream*
-        (log-info "Logging initialized - tcode session started")))))
+        (log-info "Logging initialized - tcode ~A session started" (or type ""))))))
 
 (defun cleanup-logging ()
   "Close the log file stream"

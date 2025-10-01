@@ -204,10 +204,11 @@
     (values accumulated-response tool-calls-acc)))
 
 (defun execute-tool-calls (tool-calls repl-context)
-  "Execute tool calls and return results as a list of (tool-call-id . result-string) pairs.
-   If tool-backend is set in repl-context, uses JSONRPC; otherwise calls tools locally."
+  "Execute tool calls via JSONRPC backend and return results as a list of (tool-call-id . result-string) pairs."
   (let ((results '())
         (backend (repl-context-tool-backend repl-context)))
+    (unless backend
+      (error "No tool backend available in repl-context"))
     (loop for tc across tool-calls
           when tc
           do (let* ((tc-id (jsown:val tc "id"))
@@ -226,10 +227,8 @@
                                      (jsown:do-json-keys (key val) func-args
                                        (push (cons key val) alist))
                                      alist)))
-                      ;; Use backend if available, otherwise local call
-                      (result (if backend
-                                  (call-tool-via-backend backend func-name args-alist)
-                                  (call-tool func-name args-alist))))
+                      ;; Call via JSONRPC backend
+                      (result (call-tool-via-backend backend func-name args-alist)))
                  (log-info "Tool ~A result: ~A" func-name result)
                  (push (cons tc-id result) results))))
     (nreverse results)))
@@ -357,46 +356,10 @@
         ;; Check if we have tool calls to execute
         (if (and tool-calls (> (length tool-calls) 0) (aref tool-calls 0))
             (progn
-              (log-info "Received ~A tool call(s), requesting user approval" (length tool-calls))
-
-              ;; Check if auto-approval is enabled
-              (if (repl-context-auto-approve-tools repl-context)
-                  (progn
-                    (log-info "Auto-approval enabled, executing tool calls")
-                    ;; Auto-approve and execute
-                    (continue-with-tool-results backend input-string repl-context history-item
-                                               tool-calls accumulated-response))
-
-                  ;; Request user approval
-                  (progn
-                    ;; Format tool calls for display
-                    (let ((tool-call-summary
-                           (with-output-to-string (s)
-                             (format s "~A~%~%The assistant wants to use the following tool~:P:~%~%"
-                                     (or accumulated-response ""))
-                             (loop for tc across tool-calls
-                                   for i from 1
-                                   when tc
-                                   do (let* ((tc-function (jsown:val tc "function"))
-                                            (func-name (jsown:val tc-function "name"))
-                                            (func-args-json (jsown:val tc-function "arguments")))
-                                        (format s "~A. ~A~%   Arguments: ~A~%~%"
-                                               i func-name func-args-json)))
-                             (format s "Approve? (yes/no/auto)"))))
-
-                      ;; Store pending tool calls and context for approval
-                      (bt:with-lock-held ((repl-context-mutex repl-context))
-                        (setf (repl-context-pending-tool-calls repl-context) tool-calls)
-                        (setf (repl-context-pending-accumulated-response repl-context) accumulated-response)
-                        (setf (repl-context-pending-backend repl-context) backend)
-                        (setf (repl-context-pending-input-string repl-context) input-string)
-                        (setf (repl-context-pending-history-item repl-context) history-item)
-                        (setf (repl-context-state repl-context) :waiting-for-tool-approval)
-                        (setf (history-item-result history-item) tool-call-summary))
-
-                      ;; Broadcast update
-                      (when (boundp '*sse-clients*)
-                        (broadcast-history-update))))))
+              (log-info "Received ~A tool call(s), auto-executing" (length tool-calls))
+              ;; Auto-execute tool calls
+              (continue-with-tool-results backend input-string repl-context history-item
+                                         tool-calls accumulated-response))
 
             ;; No tool calls - final result update
             (progn

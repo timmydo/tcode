@@ -83,115 +83,6 @@
                     (push history-item (repl-context-history ctx)))
                   (format nil "Added lorem ipsum test history item with ~A paragraph~:P" count)))
 
-               ;; Handle tool approval commands (yes/approve)
-               ((or (string= (string-trim " " input-string) "yes")
-                    (string= (string-trim " " input-string) "/yes")
-                    (string= (string-trim " " input-string) "/approve"))
-                (log-debug "Yes command received, state: ~A, pending-tool-calls: ~A"
-                          (repl-context-state ctx)
-                          (if (repl-context-pending-tool-calls ctx)
-                              (length (repl-context-pending-tool-calls ctx))
-                              "nil"))
-                (if (eq (repl-context-state ctx) :waiting-for-tool-approval)
-                    (let ((tool-calls (repl-context-pending-tool-calls ctx))
-                          (accumulated-response (repl-context-pending-accumulated-response ctx))
-                          (backend (repl-context-pending-backend ctx))
-                          (input-str (repl-context-pending-input-string ctx))
-                          (history-item (repl-context-pending-history-item ctx)))
-                      ;; Clear pending state
-                      (bt:with-lock-held ((repl-context-mutex ctx))
-                        (setf (repl-context-state ctx) :waiting-for-command)
-                        (setf (repl-context-pending-tool-calls ctx) nil)
-                        (setf (repl-context-pending-accumulated-response ctx) nil)
-                        (setf (repl-context-pending-backend ctx) nil)
-                        (setf (repl-context-pending-input-string ctx) nil)
-                        (setf (repl-context-pending-history-item ctx) nil))
-                      ;; Execute tool calls in background
-                      (let ((thread (bt:make-thread
-                                     (lambda ()
-                                       (handler-case
-                                           (continue-with-tool-results backend input-str ctx history-item
-                                                                      tool-calls accumulated-response)
-                                         (error (e)
-                                           (bt:with-lock-held ((repl-context-mutex ctx))
-                                             (setf (history-item-result history-item)
-                                                   (format nil "Tool execution error: ~A" e))
-                                             (log-error "Tool execution error: ~A" e))))
-                                       ;; Reset state when done
-                                       (setf (repl-context-state ctx) :normal
-                                             (repl-context-current-thread ctx) nil
-                                             (repl-context-current-stream ctx) nil))
-                                     :name "tool-execution-thread")))
-                        (setf (repl-context-current-thread ctx) thread)
-                        "Executing tool calls..."))
-                    "No pending tool calls to approve"))
-
-               ;; Handle tool approval with auto-approve (auto/approve-all)
-               ((or (string= (string-trim " " input-string) "auto")
-                    (string= (string-trim " " input-string) "/auto")
-                    (string= (string-trim " " input-string) "/approve-all"))
-                (log-debug "Auto command received, state: ~A" (repl-context-state ctx))
-                (if (eq (repl-context-state ctx) :waiting-for-tool-approval)
-                    (let ((tool-calls (repl-context-pending-tool-calls ctx))
-                          (accumulated-response (repl-context-pending-accumulated-response ctx))
-                          (backend (repl-context-pending-backend ctx))
-                          (input-str (repl-context-pending-input-string ctx))
-                          (history-item (repl-context-pending-history-item ctx)))
-                      ;; Enable auto-approval and clear pending state
-                      (bt:with-lock-held ((repl-context-mutex ctx))
-                        (setf (repl-context-auto-approve-tools ctx) t)
-                        (setf (repl-context-state ctx) :waiting-for-command)
-                        (setf (repl-context-pending-tool-calls ctx) nil)
-                        (setf (repl-context-pending-accumulated-response ctx) nil)
-                        (setf (repl-context-pending-backend ctx) nil)
-                        (setf (repl-context-pending-input-string ctx) nil)
-                        (setf (repl-context-pending-history-item ctx) nil))
-                      ;; Execute tool calls in background
-                      (let ((thread (bt:make-thread
-                                     (lambda ()
-                                       (handler-case
-                                           (continue-with-tool-results backend input-str ctx history-item
-                                                                      tool-calls accumulated-response)
-                                         (error (e)
-                                           (bt:with-lock-held ((repl-context-mutex ctx))
-                                             (setf (history-item-result history-item)
-                                                   (format nil "Tool execution error: ~A" e))
-                                             (log-error "Tool execution error: ~A" e))))
-                                       ;; Reset state when done
-                                       (setf (repl-context-state ctx) :normal
-                                             (repl-context-current-thread ctx) nil
-                                             (repl-context-current-stream ctx) nil))
-                                     :name "tool-execution-thread")))
-                        (setf (repl-context-current-thread ctx) thread)
-                        "Auto-approval enabled. Executing tool calls..."))
-                    (progn
-                      ;; Just enable auto-approval
-                      (bt:with-lock-held ((repl-context-mutex ctx))
-                        (setf (repl-context-auto-approve-tools ctx) t))
-                      "Auto-approval enabled for future tool calls")))
-
-               ;; Handle tool rejection (no/reject)
-               ((or (string= (string-trim " " input-string) "no")
-                    (string= (string-trim " " input-string) "/no")
-                    (string= (string-trim " " input-string) "/reject"))
-                (if (eq (repl-context-state ctx) :waiting-for-tool-approval)
-                    (let ((history-item (repl-context-pending-history-item ctx)))
-                      ;; Clear pending state and reject
-                      (bt:with-lock-held ((repl-context-mutex ctx))
-                        (setf (repl-context-state ctx) :normal)
-                        (setf (repl-context-pending-tool-calls ctx) nil)
-                        (setf (repl-context-pending-accumulated-response ctx) nil)
-                        (setf (repl-context-pending-backend ctx) nil)
-                        (setf (repl-context-pending-input-string ctx) nil)
-                        (setf (repl-context-pending-history-item ctx) nil)
-                        (when history-item
-                          (setf (history-item-result history-item) "Tool calls rejected by user")))
-                      ;; Broadcast update
-                      (when (boundp '*sse-clients*)
-                        (broadcast-history-update))
-                      "Tool calls rejected")
-                    "No pending tool calls to reject"))
-
                ;; Default: dispatch to backend only
                (t (if (and (boundp '*tcode-backend*) *tcode-backend*)
                       ;; Dispatch to backend
@@ -211,10 +102,8 @@
     ;; Log the result
     (log-result result)
 
-
-    ;; Reset context state (but not if we're waiting for tool approval)
-    (unless (eq (repl-context-state ctx) :waiting-for-tool-approval)
-      (setf (repl-context-state ctx) :normal))
+    ;; Reset context state
+    (setf (repl-context-state ctx) :normal)
 
     ;; Update status with directory list after /add or /rmdir commands
     (when (or (and (> (length input-string) 4)

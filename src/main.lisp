@@ -11,8 +11,29 @@
 
   (handler-case
       (progn
-        ;; Initialize logging system
-        (initialize-logging)
+        ;; Initialize logging system with client type
+        (initialize-logging :type "client")
+
+        ;; Start JSONRPC server in background
+        (let* ((jsonrpc-port (let ((env-port (uiop:getenv "TCODE_JSONRPC_PORT")))
+                              (if env-port
+                                  (parse-integer env-port :junk-allowed t)
+                                  9876))))
+          (log-info "Starting JSONRPC tool server on port ~A" jsonrpc-port)
+          (bt:make-thread
+           (lambda ()
+             (handler-case
+                 (progn
+                   (initialize-logging :type "server")
+                   (log-info "Starting JSONRPC server on port ~A" jsonrpc-port)
+                   (start-jsonrpc-server :port jsonrpc-port)
+                   ;; Keep server thread alive
+                   (loop (sleep 1)))
+               (error (e)
+                 (log-error "JSONRPC server error: ~A" e))))
+           :name "tcode-jsonrpc-server")
+          ;; Give server time to start
+          (sleep 0.5))
 
         ;; Load configuration file
         (unless (load-config-file)
@@ -59,8 +80,8 @@
   "Server entry point - starts JSONRPC tool server"
   (handler-case
       (progn
-        ;; Initialize logging system
-        (initialize-logging)
+        ;; Initialize logging system with server type
+        (initialize-logging :type "server")
 
         (format t "Starting tcode JSONRPC server on port ~A~%" port)
         (log-info "Starting JSONRPC server on port ~A" port)
