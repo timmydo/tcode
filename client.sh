@@ -2,6 +2,16 @@
 # Start tcode client with webview interface
 # This will fail if any dependencies are missing from vendor/
 
+# Check for tcode-server and build if necessary
+if [ ! -f "./tcode-server" ]; then
+    echo "tcode-server not found, building..."
+    if ! ./build-server.sh; then
+        echo "Error: build-server.sh failed"
+        exit 1
+    fi
+fi
+
+export TCODE_SERVER="$(pwd)/tcode-server"
 export CL_SOURCE_REGISTRY="$(pwd)//:"
 # Disable Quicklisp by clearing its config directory
 export QUICKLISP_HOME=""
