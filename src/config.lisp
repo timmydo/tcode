@@ -12,7 +12,7 @@
 (defvar *tcode-backend* (make-openrouter-connection \"enter-api-key-here\"))
 
 ;; Default model for OpenRouter
-(defvar *openrouter-default-model* \"x-ai/grok-4-fast:free\")
+(defvar *openrouter-default-model* \"x-ai/grok-4-fast\")
 
 ;; Example: Set a custom prompt color
 ;; (defparameter *custom-prompt-color* 6)

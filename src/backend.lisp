@@ -3,7 +3,7 @@
 (defvar *tcode-backend* nil
   "Global backend connection instance")
 
-(defvar *openrouter-default-model* "x-ai/grok-4-fast:free"
+(defvar *openrouter-default-model* "x-ai/grok-4-fast"
   "Default model for OpenRouter API")
 
 (defclass backend-connection ()
@@ -276,9 +276,7 @@
   "Send HTTP request to OpenRouter API and process streaming response.
    If tool calls are made, automatically executes them and continues the conversation."
   (let* ((api-key (openrouter-api-key backend))
-         (model (if (boundp '*openrouter-default-model*)
-                    *openrouter-default-model*
-                    "x-ai/grok-4-fast:free"))
+         (model *openrouter-default-model*)
          ;; Build messages vector from history
          (messages-list (bt:with-lock-held ((repl-context-mutex repl-context))
                           (let ((messages '()))
@@ -323,15 +321,29 @@
                payload)
 
     ;; Make HTTP request
-    (let ((stream (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
-                                      :method :post
-                                      :content payload
-                                      :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
-                                                           ("Content-Type" . "application/json"))
-                                      :want-stream t
-                                      :external-format-in :utf-8)))
+    (multiple-value-bind (stream status-code)
+        (drakma:http-request "https://openrouter.ai/api/v1/chat/completions"
+                             :method :post
+                             :content payload
+                             :additional-headers `(("Authorization" . ,(format nil "Bearer ~A" api-key))
+                                                  ("Content-Type" . "application/json"))
+                             :want-stream t
+                             :external-format-in :utf-8)
 
-      (log-debug "HTTP request initiated, processing streaming response")
+      (log-debug "HTTP request initiated with status code: ~A, processing streaming response" status-code)
+
+      ;; Log error response body for non-2xx status codes
+      (when (>= status-code 400)
+        (let ((error-body (with-output-to-string (out)
+                           (loop for line = (read-line stream nil nil)
+                                 while line
+                                 do (write-line line out)))))
+          (log-error "HTTP error ~A response body: ~A" status-code error-body)
+          (ignore-errors (close stream))
+          (bt:with-lock-held ((repl-context-mutex repl-context))
+            (setf (history-item-result history-item)
+                  (format nil "HTTP error ~A: ~A" status-code error-body)))
+          (return-from send-request)))
 
       (unless additional-messages
         (log-debug "Creating history item for command: ~A" input-string)
