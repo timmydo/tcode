@@ -14,6 +14,7 @@
                (:file "tool")
                (:file "tools/shell")
                (:file "tools/read")
+               (:file "tools/grep")
                (:file "jsonrpc-server")
                (:file "backend")
                (:file "config")
